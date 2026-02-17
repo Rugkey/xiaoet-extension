@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学术大拿 - 智慧阅读</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="../build/pdf.js"></script>
+    <link rel="stylesheet" href="academic-viewer.css">
+</head>
+
+<body class="loading">
+    <div id="app">
+        <!-- 1. Header Navigation -->
+        <header class="navbar">
+            <div class="nav-left">
+                <button id="sidebarToggle" class="btn-icon" title="Toggle Sidebar">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 12h18M3 6h18M3 18h18" />
+                    </svg>
+                </button>
+                <h1 id="docTitle">Academic Document</h1>
+            </div>
+
+            <div class="nav-middle">
+                <div class="view-controls">
+                    <button id="viewModeToggle" class="btn-icon" title="单页/双页切换">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M4 5h6v14H4V5zm10 0h6v14h-6V5z" />
+                        </svg>
+                    </button>
+                    <div class="zoom-controls-enhanced">
+                        <button id="zoomOut" class="btn-zoom" title="缩小">−</button>
+                        <button id="btnZoomMenu" class="btn-zoom-label" title="缩放选项">
+                            <span id="zoomLevel">100%</span>
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
+                                <path d="M7 10l5 5 5-5z" />
+                            </svg>
+                        </button>
+                        <button id="zoomIn" class="btn-zoom" title="放大">+</button>
+
+                        <!-- Dropdown Menu -->
+                        <div class="dropdown-menu hidden" id="zoomMenu">
+                            <div class="menu-item" data-action="fit-width">适应宽度</div>
+                            <div class="menu-item" data-action="fit-page">适应整页</div>
+                            <div class="menu-divider"></div>
+                            <div class="menu-item" data-action="50">50%</div>
+                            <div class="menu-item" data-action="100">100%</div>
+                            <div class="menu-item" data-action="150">150%</div>
+                            <div class="menu-item" data-action="200">200%</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="divider"></div>
+                <div class="page-nav">
+                    <input type="number" id="pageNumber" value="1" min="1">
+                    <span id="pageTotal">/ 0</span>
+                </div>
+                <div class="divider"></div>
+                <!-- 批注工具栏 -->
+                <div class="anno-toolbar">
+                    <button class="btn-tool" id="toolHighlight" title="Highlight">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M9 11l-6 6v3h9l3-3" />
+                            <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" />
+                        </svg>
+                    </button>
+                    <button class="btn-tool" id="toolDraw" title="Pen">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M12 19l7-7 3 3-7 7-3-3z" />
+                            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+                            <path d="M2 2l7.586 7.586" />
+                            <circle cx="11" cy="11" r="2" />
+                        </svg>
+                    </button>
+                    <button class="btn-tool" id="toolText" title="Text">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M4 7V4h16v3M9 20h6M12 4v16" />
+                        </svg>
+                    </button>
+                    <button class="btn-tool" id="toolEraser" title="Eraser">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M20 20H7L3 16C2 15 2 13 3 12L13 2L22 11L18 15" />
+                            <path d="M11 3L20 12" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="nav-right">
+                <!-- AI Button Removed -->
+                <div class="divider"></div>
+                <button id="btnUndo" class="btn-icon" title="撤销 (Ctrl+Z)" disabled>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 7v6h6" />
+                        <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+                    </svg>
+                </button>
+                <button id="btnRedo" class="btn-icon" title="重做 (Ctrl+Y)" disabled>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 7v6h-6" />
+                        <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" />
+                    </svg>
+                </button>
+                <div class="divider"></div>
+                <button id="btnDarkMode" class="btn-icon" title="Toggle Dark Mode">🌓</button>
+                <button id="btnDownload" class="btn-icon" title="Download">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Contextual Toolbar Options -->
+            <div id="toolbarOptions" class="toolbar-options">
+                <!-- Color Picker -->
+                <div class="option-group" id="optColor">
+                    <span class="option-label">颜色</span>
+                    <div class="color-swatch active" style="background-color: #ef4444;" data-color="#ef4444"><span
+                            class="check-icon">✓</span></div>
+                    <div class="color-swatch" style="background-color: #f59e0b;" data-color="#f59e0b"><span
+                            class="check-icon">✓</span></div>
+                    <div class="color-swatch" style="background-color: #10b981;" data-color="#10b981"><span
+                            class="check-icon">✓</span></div>
+                    <div class="color-swatch" style="background-color: #3b82f6;" data-color="#3b82f6"><span
+                            class="check-icon">✓</span></div>
+                    <div class="color-swatch" style="background-color: #000000;" data-color="#000000"><span
+                            class="check-icon">✓</span></div>
+                    <input type="color" id="customColor"
+                        style="width:24px; height:24px; padding:0; border:none; background:none; cursor:pointer;"
+                        title="自定义颜色">
+                </div>
+
+                <!-- Stroke Width -->
+                <div class="option-group" id="optWidth">
+                    <span class="option-label">Size</span>
+                    <input type="range" id="strokeWidth" class="range-slider" min="1" max="20" value="2"
+                        title="画笔/橡皮擦粗细">
+                    <span id="strokeWidthVal" style="font-size:12px; min-width:20px; text-align:center;">2px</span>
+                </div>
+
+                <!-- Text Size -->
+                <div class="option-group hidden" id="optTextSize">
+                    <span class="option-label">Font</span>
+                    <input type="range" id="textSize" class="range-slider" min="10" max="48" value="14">
+                    <span id="textSizeVal" style="font-size:12px; min-width:20px; text-align:center;">14px</span>
+
+                    <div class="font-style-group">
+                        <button id="btnBold" class="btn-icon-small" title="加粗 (Bold)">B</button>
+                        <button id="btnItalic" class="btn-icon-small" style="font-style:italic;"
+                            title="斜体 (Italic)">I</button>
+                    </div>
+                </div>
+
+                <!-- Opacity -->
+                <div class="option-group" id="optOpacity">
+                    <span class="option-label">Opacity</span>
+                    <input type="range" id="annoOpacity" class="range-slider" min="0" max="100" value="100"
+                        title="不透明度">
+                    <span id="annoOpacityVal" style="font-size:12px; min-width:20px; text-align:center;">100%</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="viewer-layout">
+            <!-- 2. Sidebar -->
+            <aside id="sidebar" class="sidebar">
+                <div class="sidebar-tabs">
+                    <button class="active">目录</button>
+                    <button>缩略图</button>
+                </div>
+                <!-- Sidebar UI Cleanup -->
+                <div id="outlineView" class="scroll-area">
+                    <!-- Outline injected here -->
+                </div>
+                <!-- Markdown View Removed -->
+            </aside>
+
+            <!-- 3. PDF Viewer -->
+            <section id="viewerContainer" class="pdf-scroller">
+                <div id="pdfViewer" class="pdf-canvas-layer">
+                    <!-- Pages injected here -->
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Required Scripts -->
+    <script src="../../content/utils.js"></script>
+    <script src="../../content/styles.js"></script>
+    <script src="../../content/drag.js"></script>
+    <script src="../../content/ui.js"></script>
+    <script src="../../content/adapter.js"></script>
+    <script src="../../content/main.js"></script>
+    <script src="academic-viewer.js" defer></script>
+    <!-- AI Styles Removed -->
+</body>
+
+</html>
+```

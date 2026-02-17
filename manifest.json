@@ -1,0 +1,97 @@
+{
+  "manifest_version": 3,
+  "name": "学术大拿",
+  "version": "2.1",
+  "description": "学术大拿 - 你的科研翻译助手",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "contextMenus",
+    "tabs",
+    "clipboardRead",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "file:///*",
+    "http://localhost:8000/*"
+  ],
+  "options_page": "options.html",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/pdf/web/academic-viewer.html",
+        "src/pdf/web/academic-viewer.css",
+        "src/pdf/web/academic-viewer.js",
+        "src/pdf/web/metadata-panel.js",
+        "src/pdf/web/metadata-extractor.js",
+        "src/pdf/metadata-extractor.js",
+        "src/pdf/web/*",
+        "src/pdf/build/*",
+        "src/content/utils.js",
+        "src/content/styles.js",
+        "src/content/drag.js",
+        "src/content/ui.js",
+        "src/content/main.js",
+        "src/content/adapter.js",
+        "src/content/context-processor.js",
+        "src/content/ocr-translator.js",
+        "src/content/document-translator.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.svg",
+      "48": "icons/icon48.svg",
+      "128": "icons/icon128.svg"
+    }
+  },
+  "commands": {
+    "translate_selection": {
+      "suggested_key": {
+        "default": "Alt+Shift+X"
+      },
+      "description": "Translate selected text"
+    },
+    "translate_document": {
+      "suggested_key": {
+        "default": "Alt+Shift+D"
+      },
+      "description": "Translate entire document"
+    }
+  },
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>",
+        "file:///*"
+      ],
+      "js": [
+        "src/content/utils.js",
+        "src/content/styles.js",
+        "src/content/drag.js",
+        "src/content/ui.js",
+        "src/content/adapter.js",
+        "src/content/context-processor.js",
+        "src/content/ocr-translator.js",
+        "src/content/document-translator.js",
+        "src/content/main.js"
+      ],
+      "all_frames": true
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.svg",
+    "48": "icons/icon48.svg",
+    "128": "icons/icon128.svg"
+  }
+}

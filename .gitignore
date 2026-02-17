@@ -1,0 +1,13 @@
+# 本地配置文件
+.claude/settings.local.json
+.vscode/settings.json
+
+# 编辑器文件
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 操作系统文件
+Thumbs.db
+desktop.ini

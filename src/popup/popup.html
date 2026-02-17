@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学术大拿 Popup</title>
+    <style>
+        :root {
+            --primary: #4136f1;
+            --primary-light: #eef2ff;
+            --text-main: #1f1f1f;
+            --text-sub: #5f6368;
+            --bg: #ffffff;
+            --border: #f0f0f0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            width: 320px;
+            margin: 0;
+            background: var(--bg);
+            color: var(--text-main);
+            overflow: hidden;
+        }
+
+        .container {
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+
+        .logo {
+            width: 56px;
+            height: 56px;
+            background: var(--primary-light);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 12px rgba(65, 54, 241, 0.1);
+        }
+
+        .logo svg {
+            width: 32px;
+            height: 32px;
+            fill: var(--primary);
+        }
+
+        h1 {
+            font-size: 18px;
+            margin: 0 0 8px;
+            font-weight: 700;
+        }
+
+        p {
+            font-size: 13px;
+            color: var(--text-sub);
+            margin: 0 0 24px;
+            line-height: 1.5;
+        }
+
+        .action-card {
+            width: 100%;
+            background: #fafafa;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: left;
+        }
+
+        .action-card:hover {
+            border-color: var(--primary);
+            background: var(--primary-light);
+            transform: translateY(-1px);
+        }
+
+        .action-icon {
+            font-size: 20px;
+        }
+
+        .action-text b {
+            display: block;
+            font-size: 14px;
+            margin-bottom: 2px;
+        }
+
+        .action-text span {
+            font-size: 12px;
+            color: var(--text-sub);
+        }
+
+        .footer {
+            margin-top: 8px;
+            font-size: 11px;
+            color: #ccc;
+        }
+
+        .btn-main {
+            width: 100%;
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(65, 54, 241, 0.2);
+            transition: all 0.2s;
+        }
+
+        .btn-main:hover {
+            background: #362bc9;
+            box-shadow: 0 6px 16px rgba(65, 54, 241, 0.3);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="logo">
+            <svg viewBox="0 0 24 24">
+                <path
+                    d="M12 2L2 7l10 5 10-5-10-5zm0 9l2.5-1.25L12 8.5l-2.5 1.25L12 11zm0 2.5l-5-2.5-5 2.5L12 22l10-8.5-5-2.5-5 2.5z" />
+            </svg>
+        </div>
+        <h1>学术大拿</h1>
+        <p>您的全能科研助手已就绪。</p>
+
+        <div class="action-card" id="openSettings">
+            <div class="action-icon">⚙️</div>
+            <div class="action-text">
+                <b>进入控制中心</b>
+                <span>配置 API 密钥与个性化偏好</span>
+            </div>
+        </div>
+
+        <div class="action-card" id="openPdf">
+            <div class="action-icon">📂</div>
+            <div class="action-text">
+                <b>打开本地 PDF</b>
+                <span>体验沉浸式 AI 阅读与批注</span>
+            </div>
+        </div>
+
+        <div class="footer">Version 2.1.0 • Academic Powerhouse</div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>
