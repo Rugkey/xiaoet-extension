@@ -3,13 +3,9 @@
  * Advanced context processing for intelligent translation
  */
 
-(function() {
-    'use strict';
+console.log('Loading context-processor.js...');
 
-    try {
-        console.log('Loading context-processor.js...');
-
-        class ContextProcessor {
+class ContextProcessor {
     constructor() {
         this.maxContextLength = 2000; // Maximum context length in characters
         this.maxParagraphs = 10; // Maximum paragraphs to include
@@ -348,17 +344,6 @@
     }
 }
 
-        // Export to window for browser extension
-        window.ContextProcessor = ContextProcessor;
-        console.log('ContextProcessor class defined and exported to window');
-
-    } catch (error) {
-        console.error('FATAL ERROR loading context-processor.js:', error);
-        console.error('Error stack:', error.stack);
-        // Export a dummy class so other code doesn't break
-        window.ContextProcessor = class ContextProcessor {
-            constructor() {}
-            async extractContext() { return ''; }
-        };
-    }
-})();
+// Export to window for browser extension
+window.ContextProcessor = ContextProcessor;
+console.log('ContextProcessor class defined and exported to window');
