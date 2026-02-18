@@ -128,7 +128,7 @@ npm run build
 如果您遇到问题或有建议，请通过以下方式联系我们：
 
 - 提交 [GitHub Issues](https://github.com/Rugkey/xiaoet-extension/issues)
-- 发送邮件至 [contact@example.com](mailto:contact@example.com)
+- 发送邮件至 [1336915779@qq.com](mailto:1336915779@qq.com)
 
 ## 💬 社区
 
