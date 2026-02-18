@@ -183,8 +183,10 @@ class TranslatorUI {
                     </div>
                     <div class="select-group">
                         <select id="langSelect">
-                            <option value="zh-CN">Chinese</option>
+                            <option value="zh-CN">中文</option>
                             <option value="en">English</option>
+                            <option value="ja">日本語</option>
+                            <option value="ko">한국어</option>
                         </select>
                         <svg class="select-icon" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                     </div>
@@ -332,39 +334,197 @@ class TranslatorUI {
         
         // Different UI for different modes
         if (mode === 'ocr') {
-            // OCR-specific UI
+            // Enhanced OCR-specific UI with image preview and better layout
             body.innerHTML = `
-                <div class="io-container">
-                    <div class="io-label">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
-                        </svg>
-                        <span>OCR识别</span>
-                        <div class="ocr-indicator">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                <div class="ocr-container">
+                    <div class="ocr-header">
+                        <div class="ocr-title">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
                             </svg>
-                            <span>图像翻译</span>
+                            <span>图像文字识别</span>
+                        </div>
+                        <div class="ocr-actions">
+                            <button id="btnSelectImage" class="btn-secondary" title="选择图片">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="17,8 12,3 7,8"></polyline>
+                                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                                </svg>
+                                选择图片
+                            </button>
                         </div>
                     </div>
-                    <textarea class="source" rows="1">${Utils.escapeHtml(original)}</textarea>
-                </div>
-                <div class="io-container target-box">
-                    <div class="io-label">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M12 2L2 22h20L12 2zm0 3.5L19.5 20H4.5L12 5.5z"/>
-                        </svg>
-                        <span>AI翻译</span>
-                        <div class="engine-indicator" title="当前翻译引擎">
-                            <span class="engine-badge">${this.engine.toUpperCase()}</span>
+                    
+                    <div class="ocr-image-preview" id="imagePreviewArea">
+                        <div class="image-placeholder">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                                <path d="M21 15l-5-5L5 21"></path>
+                            </svg>
+                            <p>点击"选择图片"按钮上传图像</p>
+                        </div>
+                        <img id="ocrImagePreview" style="display: none; max-width: 100%; max-height: 200px;" />
+                    </div>
+                    
+                    <div class="ocr-process-area">
+                        <div class="ocr-input-section">
+                            <div class="io-label">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                                </svg>
+                                <span>识别结果</span>
+                            </div>
+                            <textarea id="ocrSourceText" class="source" rows="3">${Utils.escapeHtml(original)}</textarea>
+                        </div>
+                        
+                        <div class="ocr-translate-section">
+                            <div class="io-label">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12 2L2 22h20L12 2zm0 3.5L19.5 20H4.5L12 5.5z"/>
+                                </svg>
+                                <span>AI翻译</span>
+                                <div class="engine-indicator" title="当前翻译引擎">
+                                    <span class="engine-badge">${this.engine.toUpperCase()}</span>
+                                </div>
+                            </div>
+                            <div style="position:relative">
+                                <textarea id="ocrTargetText" class="target" rows="3" readonly>${Utils.escapeHtml(translated)}</textarea>
+                                ${isStreaming ? '<span class="cursor"></span>' : ''}
+                            </div>
                         </div>
                     </div>
-                    <div style="position:relative">
-                        <textarea class="target" rows="1" readonly>${Utils.escapeHtml(translated)}</textarea>
-                        ${isStreaming ? '<span class="cursor"></span>' : ''}
+                    
+                    <div class="ocr-footer">
+                        <button id="btnOcrRecognize" class="btn-primary" title="执行OCR识别">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="11 19 2 12 11 5 11 19"></polygon>
+                                <polygon points="22 19 13 12 22 5 22 19"></polygon>
+                            </svg>
+                            识别文字
+                        </button>
+                        <button id="btnOcrTranslate" class="btn-accent" title="翻译识别结果">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                            翻译
+                        </button>
                     </div>
                 </div>
             `;
+            
+            // Add event listeners for OCR UI elements
+            const selectImageButton = body.querySelector('#btnSelectImage');
+            const recognizeButton = body.querySelector('#btnOcrRecognize');
+            const translateButton = body.querySelector('#btnOcrTranslate');
+            const imagePreview = body.querySelector('#ocrImagePreview');
+            const sourceTextarea = body.querySelector('#ocrSourceText');
+            const targetTextarea = body.querySelector('#ocrTargetText');
+            
+            if (selectImageButton) {
+                selectImageButton.onclick = () => {
+                    // Create file input element
+                    const fileInput = document.createElement('input');
+                    fileInput.type = 'file';
+                    fileInput.accept = 'image/*';
+                    fileInput.onchange = (e) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                                imagePreview.src = event.target.result;
+                                imagePreview.style.display = 'block';
+                                
+                                const placeholder = body.querySelector('.image-placeholder');
+                                if (placeholder) {
+                                    placeholder.style.display = 'none';
+                                }
+                                
+                                // Automatically trigger OCR recognition when image is loaded
+                                setTimeout(() => {
+                                    if (window.OCRTranslator && window.OCRTranslator.prototype && 
+                                        typeof window.OCRTranslator.prototype.initialize === 'function') {
+                                        // We won't auto-trigger OCR here to avoid issues
+                                        // User will click the recognize button manually
+                                    } else {
+                                        sourceTextarea.value = "OCR功能需要初始化，请确保Tesseract.js库已正确加载";
+                                    }
+                                }, 300);
+                            };
+                            reader.readAsDataURL(file);
+                        }
+                    };
+                    fileInput.click();
+                };
+            }
+            
+            if (recognizeButton) {
+                recognizeButton.onclick = async () => {
+                    if (window.OCRTranslator) {
+                        try {
+                            // Create OCR translator instance if it doesn't exist
+                            let ocrTranslatorInstance;
+                            if (typeof ocrTranslator !== 'undefined' && ocrTranslator) {
+                                ocrTranslatorInstance = ocrTranslator;
+                            } else {
+                                ocrTranslatorInstance = new window.OCRTranslator();
+                                await ocrTranslatorInstance.initialize();
+                            }
+                            
+                            if (imagePreview.src && imagePreview.src.startsWith('blob:') || imagePreview.src.startsWith('data:image')) {
+                                ui.showLoading(false); // Show loading without repositioning
+                                
+                                // Extract text from image using OCR
+                                const result = await ocrTranslatorInstance.ocrAndTranslate(
+                                    imagePreview.src, 
+                                    this.targetLang || 'zh-CN', 
+                                    this.engine || 'google'
+                                );
+                                
+                                // Update source text area with OCR result
+                                if (sourceTextarea) {
+                                    sourceTextarea.value = result.original;
+                                    this._autoResize(sourceTextarea);
+                                }
+                                
+                                // Update target text area with translation
+                                if (targetTextarea) {
+                                    targetTextarea.value = result.translated;
+                                    this._autoResize(targetTextarea);
+                                }
+                                
+                                ui.hideCard(); // Hide loading
+                            } else {
+                                alert('请选择一张图片后再点击识别');
+                            }
+                        } catch (error) {
+                            console.error('OCR recognition failed:', error);
+                            if (sourceTextarea) {
+                                sourceTextarea.value = `OCR识别失败: ${error.message}`;
+                            }
+                        }
+                    } else {
+                        alert('OCR功能不可用，请确保Tesseract.js库已正确加载');
+                    }
+                };
+            }
+            
+            if (translateButton && sourceTextarea && targetTextarea) {
+                translateButton.onclick = () => {
+                    const sourceText = sourceTextarea.value.trim();
+                    if (sourceText) {
+                        // Trigger re-translation with the OCR text
+                        document.dispatchEvent(new CustomEvent('xiaoet:retranslate', {
+                            detail: { 
+                                text: sourceText, 
+                                engine: this.engine, 
+                                targetLang: this.targetLang 
+                            }
+                        }));
+                    }
+                };
+            }
         } else if (mode === 'document') {
             // Document translation UI
             body.innerHTML = `

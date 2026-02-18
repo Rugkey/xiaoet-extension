@@ -37,7 +37,10 @@
         "src/content/adapter.js",
         "src/content/context-processor.js",
         "src/content/ocr-translator.js",
-        "src/content/document-translator.js"
+        "src/content/document-translator.js",
+        "src/content/tesseract-worker.js",
+        "src/content/tesseract-full.js",
+        "src/content/full-ocr-implementation.js"
       ],
       "matches": [
         "<all_urls>"
@@ -76,14 +79,16 @@
         "file:///*"
       ],
       "js": [
+        "src/content/tesseract-full.js",
+        "src/content/full-ocr-implementation.js",
         "src/content/utils.js",
         "src/content/styles.js",
         "src/content/drag.js",
         "src/content/ui.js",
         "src/content/adapter.js",
         "src/content/context-processor.js",
-        "src/content/ocr-translator.js",
         "src/content/document-translator.js",
+        "src/content/ocr-translator.js",
         "src/content/main.js"
       ],
       "all_frames": true

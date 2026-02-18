@@ -43,9 +43,15 @@ if (typeof window.TranslatorUI !== 'undefined') {
 // Initialize Content Adapter with safety check
 let adapter = null;
 if (typeof window.ContentAdapter !== 'undefined') {
-    adapter = new window.ContentAdapter();
+    try {
+        adapter = new window.ContentAdapter();
+        console.log('ContentAdapter initialized');
+    } catch (e) {
+        console.error('Failed to initialize ContentAdapter:', e);
+        adapter = null;
+    }
 } else {
-    console.warn('ContentAdapter not available, using basic functionality');
+    console.error('ContentAdapter not available');
 }
 
 // Initialize Context Processor
@@ -59,7 +65,7 @@ if (typeof window.ContextProcessor !== 'undefined') {
         contextProcessor = null;
     }
 } else {
-    console.warn('ContextProcessor not available');
+    console.error('ContextProcessor not available');
 }
 
 // Initialize Document Translator
@@ -73,7 +79,7 @@ if (typeof window.DocumentTranslator !== 'undefined') {
         documentTranslator = null;
     }
 } else {
-    console.warn('DocumentTranslator not available');
+    console.error('DocumentTranslator not available');
 }
 
 // Initialize OCR Translator (can be done asynchronously)
@@ -92,7 +98,7 @@ if (typeof window.OCRTranslator !== 'undefined') {
         ocrTranslator = null;
     }
 } else {
-    console.warn('OCRTranslator not available');
+    console.error('OCRTranslator not available');
 }
 
     // Only continue if UI is available
@@ -127,6 +133,9 @@ if (typeof window.OCRTranslator !== 'undefined') {
                 documentTranslator.restoreOriginalText();
                 state.isDocumentTranslating = false;
                 alert('文档已恢复为原文');
+            } else {
+                console.error('DocumentTranslator not available for restoration');
+                alert('文档恢复功能暂不可用，请刷新页面重试。');
             }
         }
         else if (msg.type === 'TRIGGER_EXPORT_DOCUMENT') {
@@ -156,6 +165,9 @@ if (typeof window.OCRTranslator !== 'undefined') {
                 ui.showResult(msg.payload.original, msg.payload.translated, 'ocr');
             } else if (!msg.success) {
                 console.error('OCR translation failed:', msg.error);
+                if (ui) {
+                    ui.showResult('', `OCR翻译失败: ${msg.error}`, 'ocr');
+                }
             }
         }
         else if (msg.type === 'DOCUMENT_TRANSLATION_RESULT') {
@@ -225,7 +237,12 @@ if (typeof window.OCRTranslator !== 'undefined') {
                     }
                 } else if (adapter) {
                     // Fallback to adapter context extraction
-                    context = adapter.getContextAroundSelection(sel);
+                    try {
+                        context = adapter.getContextAroundSelection(sel);
+                    } catch (err) {
+                        console.warn('Failed to extract context with adapter:', err);
+                        context = '';
+                    }
                 }
 
                 // Capture rect
@@ -281,14 +298,18 @@ if (typeof window.OCRTranslator !== 'undefined') {
             console.error("UI not available, cannot perform document translation");
             return;
         }
-        
+
+        if (!documentTranslator) {
+            console.error("DocumentTranslator not available");
+            alert('文档翻译功能暂不可用，请刷新页面重试。');
+            return;
+        }
+
         if (state.isDocumentTranslating) {
             // If already translating, offer to restore
             if (confirm('文档正在翻译中，是否恢复原文？')) {
-                if (documentTranslator) {
-                    documentTranslator.restoreOriginalText();
-                    state.isDocumentTranslating = false;
-                }
+                documentTranslator.restoreOriginalText();
+                state.isDocumentTranslating = false;
             }
             return;
         }
@@ -297,26 +318,22 @@ if (typeof window.OCRTranslator !== 'undefined') {
             const engine = items.translationEngine || 'google';
             const targetLang = items.targetLang || 'zh-CN';
 
-            if (documentTranslator) {
-                state.isDocumentTranslating = true;
-                ui.showLoading(true);
-                
-                documentTranslator.translateDocument(targetLang, engine)
-                    .then(result => {
-                        state.isDocumentTranslating = false;
-                        if (result.success) {
-                            ui.hideCard(); // Hide translation card after document translation
-                            alert(`文档翻译完成！共处理了 ${result.segmentsProcessed} 个文本段落。`);
-                        }
-                    })
-                    .catch(error => {
-                        state.isDocumentTranslating = false;
-                        console.error('Document translation failed:', error);
-                        alert(`文档翻译失败: ${error.message}`);
-                    });
-            } else {
-                alert('文档翻译功能不可用，请稍后重试。');
-            }
+            state.isDocumentTranslating = true;
+            ui.showLoading(true);
+
+            documentTranslator.translateDocument(targetLang, engine)
+                .then(result => {
+                    state.isDocumentTranslating = false;
+                    if (result.success) {
+                        ui.hideCard(); // Hide translation card after document translation
+                        alert(`文档翻译完成！共处理了 ${result.segmentsProcessed} 个文本段落。`);
+                    }
+                })
+                .catch(error => {
+                    state.isDocumentTranslating = false;
+                    console.error('Document translation failed:', error);
+                    alert(`文档翻译失败: ${error.message}`);
+                });
         });
     }
 
@@ -454,18 +471,45 @@ if (typeof window.OCRTranslator !== 'undefined') {
             console.error("UI not available, cannot perform OCR translation");
             return;
         }
-        
-        if (!ocrTranslator) {
-            alert('OCR功能尚未初始化，请稍后再试。');
-            return;
+
+        // Try to create OCR translator if it doesn't exist
+        let ocrTranslatorInstance = ocrTranslator;
+        if (!ocrTranslatorInstance) {
+            if (typeof window.OCRTranslator !== 'undefined') {
+                ocrTranslatorInstance = new window.OCRTranslator();
+                try {
+                    await ocrTranslatorInstance.initialize();
+                    console.log('OCRTranslator initialized on demand');
+                } catch (initError) {
+                    console.error('Failed to initialize OCRTranslator:', initError);
+                    alert('OCR功能初始化失败，请检查网络连接后重试。');
+                    return;
+                }
+            } else {
+                console.error("OCRTranslator not available");
+                alert('OCR功能暂不可用，请刷新页面后重试。');
+                return;
+            }
+        } else {
+            // Check if OCRTranslator is properly initialized
+            if (!ocrTranslatorInstance.isInitialized) {
+                try {
+                    await ocrTranslatorInstance.initialize();
+                    console.log('OCRTranslator initialized on demand');
+                } catch (initError) {
+                    console.error('Failed to initialize OCRTranslator:', initError);
+                    alert('OCR功能初始化失败，请检查网络连接后重试。');
+                    return;
+                }
+            }
         }
 
         try {
             ui.showLoading(true);
-            const result = await ocrTranslator.ocrAndTranslate(imgElement.src, state.settings.targetLang || 'zh-CN', state.settings.translationEngine || 'google');
-            
+            const result = await ocrTranslatorInstance.ocrAndTranslate(imgElement.src, state.settings.targetLang || 'zh-CN', state.settings.translationEngine || 'google');
+
             // Show the OCR result
-            ui.showResult(`OCR识别结果: ${result.original}`, result.translated, 'ocr');
+            ui.showResult(result.original, result.translated, 'ocr');
         } catch (error) {
             console.error('OCR translation failed:', error);
             alert(`OCR翻译失败: ${error.message}`);

@@ -3,9 +3,13 @@
  * Document translation functionality
  */
 
-console.log('Loading document-translator.js...');
+(function() {
+    'use strict';
 
-class DocumentTranslator {
+    try {
+        console.log('Loading document-translator.js...');
+
+        class DocumentTranslator {
     constructor() {
         this.isTranslating = false;
         this.currentProgress = 0;
@@ -310,6 +314,12 @@ class DocumentTranslator {
     }
 }
 
-// Export to window for browser extension
-window.DocumentTranslator = DocumentTranslator;
-console.log('DocumentTranslator class defined and exported to window');
+        window.DocumentTranslator = DocumentTranslator;
+        console.log('DocumentTranslator class defined and exported to window');
+
+    } catch (error) {
+        console.error('FATAL ERROR in document-translator.js:', error);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+    }
+})();
