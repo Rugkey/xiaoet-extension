@@ -686,14 +686,43 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 // 2. PDF REDIRECTION
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.status === 'loading' && tab.url) {
-        if (tab.url.startsWith('file://') && /\.pdf$/i.test(tab.url)) {
-            const viewerUrl = chrome.runtime.getURL(`src/pdf/web/academic-viewer.html?file=${encodeURIComponent(tab.url)}`);
-            chrome.tabs.update(tabId, { url: viewerUrl });
+function isRedirectedToAcademicViewer(url) {
+    if (!url || typeof url !== 'string') return false;
+    return url.startsWith(chrome.runtime.getURL('src/pdf/web/academic-viewer.html'));
+}
+
+function isSupportedPdfUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    if (isRedirectedToAcademicViewer(url)) return false;
+    if (!/^(file|https?):\/\//i.test(url)) return false;
+
+    const cleanUrl = url.split('#')[0];
+    return /\.pdf(?:$|\?)/i.test(cleanUrl);
+}
+
+function redirectPdfTab(tabId, rawUrl) {
+    if (!tabId || !isSupportedPdfUrl(rawUrl)) return;
+    const viewerUrl = chrome.runtime.getURL(`src/pdf/web/academic-viewer.html?file=${encodeURIComponent(rawUrl)}`);
+    chrome.tabs.update(tabId, { url: viewerUrl }, () => {
+        if (chrome.runtime.lastError) {
+            console.debug('PDF redirect skipped:', chrome.runtime.lastError.message);
         }
-    }
+    });
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    const candidateUrl = changeInfo.url || tab?.url || '';
+    if (!candidateUrl) return;
+    if (changeInfo.status && changeInfo.status !== 'loading') return;
+    redirectPdfTab(tabId, candidateUrl);
 });
+
+if (chrome.webNavigation && chrome.webNavigation.onBeforeNavigate) {
+    chrome.webNavigation.onBeforeNavigate.addListener((details) => {
+        if (details.frameId !== 0) return;
+        redirectPdfTab(details.tabId, details.url);
+    });
+}
 
 // 3. CONTEXT MENU CLICKS
 chrome.contextMenus.onClicked.addListener((info, tab) => {

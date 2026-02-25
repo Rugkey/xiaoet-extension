@@ -333,15 +333,17 @@ input,
     border: none;
     background: transparent;
     color: var(--text-sub);
-    width: 18px;
-    height: 18px;
+    width: 24px;
+    height: 24px;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 11px;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    flex: 0 0 18px;
+    flex: 0 0 24px;
 }
 
 .outline-toggle:hover {
@@ -365,12 +367,16 @@ input,
 /* Thumbnails */
 .thumbnail-item {
     margin-bottom: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     text-align: center;
     cursor: pointer;
 }
 
 .thumbnail-item canvas {
     display: block;
+    margin: 0 auto;
     border: 1px solid var(--border-color);
     border-radius: 4px;
     transition: transform 0.2s;
@@ -386,6 +392,8 @@ input,
     color: var(--text-sub);
     margin-top: 4px;
     display: block;
+    width: 100%;
+    text-align: center;
 }
 
 /* 3. PDF Canvas - SMOOTH ZOOM */
@@ -436,6 +444,8 @@ input,
     pointer-events: auto;
     /* ALLOW SELECTION */
     mix-blend-mode: normal;
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 .textLayer>span {
@@ -445,6 +455,8 @@ input,
     cursor: text;
     transform-origin: 0% 0%;
     pointer-events: auto;
+    -webkit-user-select: text;
+    user-select: text;
 }
 
 .textLayer>span.search-hit {
@@ -466,10 +478,28 @@ input,
 }
 
 /* Explicit Selection Highlight */
-.textLayer ::selection {
-    background: rgba(59, 130, 246, 0.3);
-    /* Blue with transparency */
+.textLayer::selection,
+.textLayer *::selection {
+    background: transparent;
+}
+
+.textLayer > span::selection {
+    background: rgba(59, 130, 246, 0.22);
     color: transparent;
+}
+
+.textLayer .endOfContent,
+.textLayer .endOfContent::selection {
+    background: transparent !important;
+}
+
+.textLayer .endOfContent {
+    position: absolute;
+    left: -9999px;
+    top: -9999px;
+    width: 0;
+    height: 0;
+    pointer-events: none;
 }
 
 .page-container canvas {
