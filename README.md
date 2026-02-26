@@ -2,6 +2,8 @@
 
 # 🎓 AcadMaster（学术大拿）
 
+🌐 中文 | [English](README.en.md)
+
 **你的科研翻译助手 — 一键翻译论文、网页与图片**
 
 [![Manifest V3](https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/mv3/)
