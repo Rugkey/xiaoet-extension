@@ -8,7 +8,7 @@
 
 [![Manifest V3](https://img.shields.io/badge/Manifest-V3-blue?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/mv3/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.2.0-orange.svg)](manifest.json)
+[![Version](https://img.shields.io/badge/version-2.3.0-orange.svg)](manifest.json)
 
 Chrome / Edge 浏览器扩展 · 纯前端 · 零构建 · 开箱即用
 
@@ -18,15 +18,15 @@ Chrome / Edge 浏览器扩展 · 纯前端 · 零构建 · 开箱即用
 
 ## ✨ 核心特性
 
-## 📣 最新更新（v2.2.0）
+## 📣 最新更新（v2.3.0）
 
-- 新增在线 PDF 接管开关（可在设置中关闭，保留本地 PDF 接管）
-- 新增术语库领域增强（自动/学术/技术/医学/法律/商务）
-- 新增引文友好翻译（保护 DOI、引用编号、图表编号、URL）
-- 优化 PDF 选区与缩放稳定性（减少跳跃与误高亮）
-- 新增运行诊断面板（查看最近错误、支持一键清空）
-- 优化大文档翻译性能（自适应批次 + 并发控制）
-- 新增新手引导提示与设置同步（非敏感配置）
+- 重构 PDF 文本拖选架构：改为手动接管选区，显著减少跨行/双栏跳选问题
+- 新增图片导出能力：支持导出当前页图片、整本图片、手动框选区域导出
+- 图片导出统一为 PNG 无损格式，并采用标准统一命名规则
+- 自动导出新增兜底策略：未提取到原始图像对象时，自动无损导出整页图像
+- PDF 侧边栏恢复三标签导航（目录 / 缩略图 / 搜索），修复目录标题遮挡问题
+- 点击空白区域可清除文本选区，提升阅读与批注交互一致性
+- PDF 查看器本地存储键前缀升级为 `acadmaster`，兼容迁移旧 `xiaoet` 数据
 
 | 功能 | 说明 |
 |------|------|
