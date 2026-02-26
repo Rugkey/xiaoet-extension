@@ -20,6 +20,9 @@
         this.maxTranslateRetries = 1;
         this.taskTimeoutMs = 45000;
         this.pdfNewlinesEnabled = true;
+        this.bigDocPerformanceMode = true;
+        this.baseBatchSize = 8;
+        this.maxParallelRequests = 4;
         this.isPdfViewerPage = /\/src\/pdf\/web\/academic-viewer\.html$/i.test(window.location.pathname || '');
     }
 
@@ -35,6 +38,7 @@
         this.processedSegments = 0;
         this.bilingualMode = bilingual;
         this.pdfNewlinesEnabled = await this.loadPdfNewlinesSetting();
+        await this.loadPerformanceSettings();
 
         try {
             const segments = this.extractTextSegments();
@@ -44,7 +48,8 @@
                 throw new Error('No translatable content found in document');
             }
 
-            const batchSize = 10;
+            const batchSize = this.getAdaptiveBatchSize(segments.length);
+            const parallel = this.getAdaptiveParallel(segments.length);
             const results = [];
             this.currentStage = 'translating';
 
@@ -55,16 +60,14 @@
 
                 const batch = segments.slice(i, i + batchSize);
 
-                const batchResults = await Promise.all(
-                    batch.map((segment, offset) => this.translateSegment(segment, targetLang, engine, i + offset, segments))
-                );
+                const batchResults = await this.translateBatchWithConcurrency(batch, targetLang, engine, i, segments, parallel);
 
                 results.push(...batchResults);
 
                 this.processedSegments += batch.length;
                 this.currentProgress = (this.processedSegments / this.totalSegments) * 100;
 
-                await this.delay(100);
+                await this.delay(this.bigDocPerformanceMode ? 120 : 80);
             }
 
             if (this.cancelRequested) {
@@ -89,6 +92,46 @@
                 this.currentStage = this.cancelRequested ? 'canceled' : 'idle';
             }
         }
+    }
+
+    getAdaptiveBatchSize(totalSegments) {
+        if (!this.bigDocPerformanceMode) {
+            return Math.max(4, Number(this.baseBatchSize || 8));
+        }
+        if (totalSegments >= 300) return 3;
+        if (totalSegments >= 180) return 4;
+        if (totalSegments >= 80) return 6;
+        return Math.max(4, Number(this.baseBatchSize || 8));
+    }
+
+    getAdaptiveParallel(totalSegments) {
+        if (!this.bigDocPerformanceMode) {
+            return Math.max(2, Number(this.maxParallelRequests || 4));
+        }
+        if (totalSegments >= 300) return 2;
+        if (totalSegments >= 120) return 3;
+        return Math.max(2, Number(this.maxParallelRequests || 4));
+    }
+
+    async translateBatchWithConcurrency(batch, targetLang, engine, startIndex, allSegments, parallel = 3) {
+        const results = new Array(batch.length);
+        let nextIndex = 0;
+        const workerCount = Math.max(1, Math.min(parallel, batch.length));
+
+        const workers = Array.from({ length: workerCount }, async () => {
+            while (nextIndex < batch.length) {
+                if (this.cancelRequested) {
+                    throw new Error('DOCUMENT_TRANSLATION_CANCELED');
+                }
+                const current = nextIndex;
+                nextIndex += 1;
+                const segment = batch[current];
+                results[current] = await this.translateSegment(segment, targetLang, engine, startIndex + current, allSegments);
+            }
+        });
+
+        await Promise.all(workers);
+        return results;
     }
 
     /**
@@ -423,6 +466,25 @@
         return new Promise((resolve) => {
             Utils.getSettings({ pdfNewlines: true }, (items) => {
                 resolve(items?.pdfNewlines !== false);
+            });
+        });
+    }
+
+    async loadPerformanceSettings() {
+        if (typeof Utils === 'undefined' || typeof Utils.getSettings !== 'function') {
+            return;
+        }
+
+        return new Promise((resolve) => {
+            Utils.getSettings({
+                bigDocPerformanceMode: true,
+                documentBatchSize: 8,
+                documentParallelRequests: 4
+            }, (items) => {
+                this.bigDocPerformanceMode = items?.bigDocPerformanceMode !== false;
+                this.baseBatchSize = Math.max(3, Math.min(12, Number(items?.documentBatchSize || 8)));
+                this.maxParallelRequests = Math.max(1, Math.min(8, Number(items?.documentParallelRequests || 4)));
+                resolve();
             });
         });
     }

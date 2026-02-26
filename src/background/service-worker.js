@@ -26,6 +26,8 @@ const TASKS = new Map();
 const MAX_TASKS = 300;
 const CANCELED_TASKS = new Set();
 const TASK_METRICS_STORAGE_KEY = 'taskMetrics';
+const RUNTIME_DIAGNOSTICS_KEY = 'runtimeDiagnostics';
+const MAX_RUNTIME_DIAGNOSTICS = 120;
 const MAX_TASK_HISTORY = 300;
 const TASK_METRICS = {
     total: 0,
@@ -59,6 +61,41 @@ const DOMAIN_PROMPTS = {
     'literature': 'You are a literary translator. Preserve the style, tone, rhythm, and literary devices of the original text. Prioritize natural, elegant expression over literal accuracy.',
     'business': 'You are a business translator. Use formal, professional language appropriate for corporate communications, reports, and official documents.'
 };
+
+const DOMAIN_GLOSSARY_PACKS = {
+    academic: [
+        { source: 'et al.', target: '等人' },
+        { source: 'methodology', target: '方法学' },
+        { source: 'hypothesis', target: '假设' },
+        { source: 'significant', target: '显著' }
+    ],
+    technical: [
+        { source: 'latency', target: '延迟' },
+        { source: 'throughput', target: '吞吐量' },
+        { source: 'fine-tuning', target: '微调' },
+        { source: 'benchmark', target: '基准测试' }
+    ],
+    medical: [
+        { source: 'placebo', target: '安慰剂' },
+        { source: 'cohort', target: '队列' },
+        { source: 'adverse event', target: '不良事件' },
+        { source: 'double-blind', target: '双盲' }
+    ],
+    legal: [
+        { source: 'plaintiff', target: '原告' },
+        { source: 'defendant', target: '被告' },
+        { source: 'jurisdiction', target: '司法管辖权' },
+        { source: 'liability', target: '责任' }
+    ],
+    business: [
+        { source: 'revenue', target: '营收' },
+        { source: 'gross margin', target: '毛利率' },
+        { source: 'cash flow', target: '现金流' },
+        { source: 'quarter-over-quarter', target: '环比' }
+    ]
+};
+
+let autoCaptureOnlinePdf = true;
 
 // --- Shared helpers ---
 
@@ -567,6 +604,48 @@ async function persistTaskMetricsToStorage() {
     }
 }
 
+async function loadRuntimePreferences() {
+    try {
+        const data = await chrome.storage.local.get({ autoCaptureOnlinePdf: true });
+        autoCaptureOnlinePdf = data.autoCaptureOnlinePdf !== false;
+    } catch (e) {
+        console.debug('Failed to load runtime preferences:', e);
+    }
+}
+
+async function appendRuntimeDiagnostic(entry = {}) {
+    try {
+        const data = await chrome.storage.local.get({ [RUNTIME_DIAGNOSTICS_KEY]: [] });
+        const list = Array.isArray(data[RUNTIME_DIAGNOSTICS_KEY]) ? data[RUNTIME_DIAGNOSTICS_KEY] : [];
+        list.push({
+            ts: Date.now(),
+            source: String(entry.source || 'unknown'),
+            code: String(entry.code || classifyFailureReason(entry.message || '')),
+            message: String(entry.message || '未知错误').slice(0, 260),
+            taskId: String(entry.taskId || ''),
+            mode: String(entry.mode || ''),
+            engine: String(entry.engine || '')
+        });
+        const trimmed = list.slice(-MAX_RUNTIME_DIAGNOSTICS);
+        await chrome.storage.local.set({ [RUNTIME_DIAGNOSTICS_KEY]: trimmed });
+    } catch (e) {
+        console.debug('Failed to append runtime diagnostic:', e);
+    }
+}
+
+async function getRuntimeDiagnostics() {
+    const data = await chrome.storage.local.get({ [RUNTIME_DIAGNOSTICS_KEY]: [] });
+    const entries = Array.isArray(data[RUNTIME_DIAGNOSTICS_KEY]) ? data[RUNTIME_DIAGNOSTICS_KEY] : [];
+    const oneHourAgo = Date.now() - (60 * 60 * 1000);
+    return {
+        entries,
+        stats: {
+            failedInHour: entries.filter(item => Number(item.ts || 0) >= oneHourAgo).length,
+            lastErrorAt: entries.length ? Number(entries[entries.length - 1].ts || 0) : 0
+        }
+    };
+}
+
 function getTMEntries() {
     return Array.from(TRANSLATION_MEMORY.entries())
         .map(([key, item]) => ({
@@ -660,6 +739,7 @@ async function importTranslationMemory(payload) {
 
 // 1. INITIALIZATION
 loadTaskMetricsFromStorage();
+loadRuntimePreferences();
 
 chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.removeAll(() => {
@@ -685,6 +765,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     }
 });
 
+chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    if (Object.prototype.hasOwnProperty.call(changes, 'autoCaptureOnlinePdf')) {
+        autoCaptureOnlinePdf = changes.autoCaptureOnlinePdf.newValue !== false;
+    }
+});
+
 // 2. PDF REDIRECTION
 function isRedirectedToAcademicViewer(url) {
     if (!url || typeof url !== 'string') return false;
@@ -695,6 +782,11 @@ function isSupportedPdfUrl(url) {
     if (!url || typeof url !== 'string') return false;
     if (isRedirectedToAcademicViewer(url)) return false;
     if (!/^(file|https?):\/\//i.test(url)) return false;
+
+    const isFilePdf = /^file:\/\//i.test(url);
+    const isOnlinePdf = /^https?:\/\//i.test(url);
+    if (isOnlinePdf && !autoCaptureOnlinePdf) return false;
+    if (!isFilePdf && !isOnlinePdf) return false;
 
     const cleanUrl = url.split('#')[0];
     return /\.pdf(?:$|\?)/i.test(cleanUrl);
@@ -840,6 +932,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     } else if (request.type === 'GET_TASK_STATS') {
         sendResponse({ success: true, stats: getTaskStats() });
+    } else if (request.type === 'GET_RUNTIME_DIAGNOSTICS') {
+        (async () => {
+            try {
+                const result = await getRuntimeDiagnostics();
+                sendResponse({ success: true, entries: result.entries, stats: result.stats });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message });
+            }
+        })();
+        return true;
+    } else if (request.type === 'CLEAR_RUNTIME_DIAGNOSTICS') {
+        (async () => {
+            try {
+                await chrome.storage.local.set({ [RUNTIME_DIAGNOSTICS_KEY]: [] });
+                sendResponse({ success: true });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message });
+            }
+        })();
+        return true;
     } else if (request.type === 'CLEAR_TRANSLATION_MEMORY') {
         (async () => {
             try {
@@ -914,6 +1026,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: true });
     } else if (request.type === 'SETTINGS_UPDATED') {
         TRANSLATION_CACHE.clear();
+        loadRuntimePreferences();
         sendResponse({ success: true });
     }
 });
@@ -961,8 +1074,10 @@ async function getSettings() {
         translationModel: '',
         glossaryEnabled: true,
         termGlossary: [],
+        glossaryDomain: 'auto',
         tmFuzzyEnabled: true,
-        tmFuzzyThreshold: 0.82
+        tmFuzzyThreshold: 0.82,
+        citationFriendlyMode: true
     });
 }
 
@@ -982,6 +1097,61 @@ function normalizeGlossary(glossary) {
         })
         .filter(Boolean)
         .sort((a, b) => b.source.length - a.source.length);
+}
+
+function resolveGlossaryDomain(profile, preferredDomain) {
+    const domain = String(preferredDomain || 'auto');
+    if (domain && domain !== 'auto' && domain !== 'none') return domain;
+    if (DOMAIN_GLOSSARY_PACKS[profile]) return profile;
+    return 'academic';
+}
+
+function buildMergedGlossary(settings, profile) {
+    const customGlossary = settings.glossaryEnabled === false ? [] : normalizeGlossary(settings.termGlossary);
+    const domain = resolveGlossaryDomain(profile, settings.glossaryDomain);
+    if (settings.glossaryEnabled === false || domain === 'none') return customGlossary;
+
+    const domainGlossary = normalizeGlossary(DOMAIN_GLOSSARY_PACKS[domain] || []);
+    if (!domainGlossary.length) return customGlossary;
+
+    const bySource = new Map();
+    [...domainGlossary, ...customGlossary].forEach((item) => {
+        if (!item || !item.source || !item.target) return;
+        bySource.set(item.source.toLowerCase(), item);
+    });
+    return Array.from(bySource.values()).sort((a, b) => b.source.length - a.source.length);
+}
+
+function protectCitationSegments(text) {
+    const source = String(text || '');
+    const tokens = [];
+    let output = source;
+    const patterns = [
+        /\[(?:\d+[\s,;\-]*)+\]/g,
+        /\((?:[A-Z][A-Za-z\-]+(?:\set\sal\.)?,\s*\d{4}[a-z]?)\)/g,
+        /\b(?:Fig|Figure|Table|Eq|Equation)\.?\s*\(?\d+[A-Za-z]?\)?/g,
+        /10\.\d{4,9}\/[\-._;()/:A-Z0-9]+/gi,
+        /https?:\/\/[^\s]+/gi
+    ];
+
+    patterns.forEach((pattern) => {
+        output = output.replace(pattern, (matched) => {
+            const index = tokens.length;
+            tokens.push(matched);
+            return `__XIAOET_CITE_${index}__`;
+        });
+    });
+
+    return { text: output, tokens };
+}
+
+function restoreCitationSegments(text, tokens) {
+    let output = String(text || '');
+    if (!Array.isArray(tokens) || !tokens.length) return output;
+    tokens.forEach((token, idx) => {
+        output = output.split(`__XIAOET_CITE_${idx}__`).join(token);
+    });
+    return output;
 }
 
 function applyGlossaryToTranslation(text, glossary) {
@@ -1129,6 +1299,13 @@ async function translateText(text, tabId, options) {
     } catch (e) {
         errorCount++;
         console.error('Translation error:', e);
+        appendRuntimeDiagnostic({
+            source: 'translateText',
+            message: e?.message || String(e),
+            taskId: options.taskId || '',
+            mode: options.mode || 'translate',
+            engine: options.engine || ''
+        });
         if (options.taskId) {
             emitTaskEvent(tabId, options.taskId, 'TASK_ERROR', normalizeErrorForUI(e));
             emitTaskDone(tabId, options.taskId, 'failed', { reason: e.message || 'Translation failed' });
@@ -1171,7 +1348,15 @@ async function saveToHistory(original, translated, engine, targetLang, detectedL
 async function translateSingle(text, options) {
     const { engine, targetLang = 'zh-CN', profile = 'default', context = '' } = options;
     const settings = await getSettings();
-    const glossary = settings.glossaryEnabled === false ? [] : normalizeGlossary(settings.termGlossary);
+    const glossary = buildMergedGlossary(settings, profile);
+    const protectedInput = settings.citationFriendlyMode === false
+        ? { text, tokens: [] }
+        : protectCitationSegments(text);
+
+    const finalizeOutput = (rawText) => {
+        const restored = restoreCitationSegments(rawText, protectedInput.tokens);
+        return applyGlossaryToTranslation(restored, glossary);
+    };
 
     // Auto language direction: if text looks like it's already in the target language,
     // flip to English (or the opposite direction)
@@ -1183,29 +1368,29 @@ async function translateSingle(text, options) {
 
     try {
         if (engine === 'google') {
-            const result = await translateWithGoogle(text, effectiveTargetLang);
-            return { text: applyGlossaryToTranslation(result.text, glossary), detectedLang: result.detectedLang };
+            const result = await translateWithGoogle(protectedInput.text, effectiveTargetLang);
+            return { text: finalizeOutput(result.text), detectedLang: result.detectedLang };
         } else if (engine === 'deepl') {
-            const result = await translateWithDeepL(text, settings.deeplKey, effectiveTargetLang);
-            return { text: applyGlossaryToTranslation(result, glossary), detectedLang: null };
+            const result = await translateWithDeepL(protectedInput.text, settings.deeplKey, effectiveTargetLang);
+            return { text: finalizeOutput(result), detectedLang: null };
         } else if (engine === 'deepseek') {
             const prompt = buildPrompt(profile, effectiveTargetLang, context);
             const model = settings.translationModel || 'deepseek-chat';
-            const result = await translateWithDeepSeek(text, settings.deepseekKey, prompt, model);
-            return { text: applyGlossaryToTranslation(result, glossary), detectedLang: null };
+            const result = await translateWithDeepSeek(protectedInput.text, settings.deepseekKey, prompt, model);
+            return { text: finalizeOutput(result), detectedLang: null };
         } else if (engine === 'openai') {
             const prompt = buildPrompt(profile, effectiveTargetLang, context);
             const model = settings.translationModel || 'gpt-4o';
-            const result = await translateWithOpenAI(text, settings.openaiKey, model, prompt);
-            return { text: applyGlossaryToTranslation(result, glossary), detectedLang: null };
+            const result = await translateWithOpenAI(protectedInput.text, settings.openaiKey, model, prompt);
+            return { text: finalizeOutput(result), detectedLang: null };
         }
     } catch (e) {
         // Auto-fallback to Google Translate
         if (engine !== 'google') {
             console.warn(`${engine} failed, falling back to Google:`, e.message);
             try {
-                const fallbackResult = await translateWithGoogle(text, effectiveTargetLang);
-                return { text: applyGlossaryToTranslation(fallbackResult.text, glossary), detectedLang: fallbackResult.detectedLang, fallbackEngine: 'google' };
+                const fallbackResult = await translateWithGoogle(protectedInput.text, effectiveTargetLang);
+                return { text: finalizeOutput(fallbackResult.text), detectedLang: fallbackResult.detectedLang, fallbackEngine: 'google' };
             } catch (fallbackErr) {
                 throw e; // Re-throw original error if fallback also fails
             }
@@ -1213,8 +1398,8 @@ async function translateSingle(text, options) {
         throw e;
     }
 
-    const result = await translateWithGoogle(text, effectiveTargetLang);
-    return { text: applyGlossaryToTranslation(result.text, glossary), detectedLang: result.detectedLang };
+    const result = await translateWithGoogle(protectedInput.text, effectiveTargetLang);
+    return { text: finalizeOutput(result.text), detectedLang: result.detectedLang };
 }
 
 /**
@@ -1345,6 +1530,13 @@ async function handleStreamTranslation(text, tabId, engine, targetLang, profile 
                 engine = 'openai';
                 model = settings.translationModel || 'gpt-4o';
             } else {
+                appendRuntimeDiagnostic({
+                    source: 'stream-config',
+                    message: 'No API keys configured for streaming engines.',
+                    taskId,
+                    mode: 'stream',
+                    engine
+                });
                 emitTaskEvent(tabId, taskId, 'TASK_ERROR', normalizeErrorForUI('Error: No API keys configured for streaming engines.'));
                 emitTaskDone(tabId, taskId, 'failed', { reason: 'No API keys configured for streaming engines.' });
                 taskDoneEmitted = true;
@@ -1353,6 +1545,13 @@ async function handleStreamTranslation(text, tabId, engine, targetLang, profile 
         }
 
         if (!apiKey) {
+            appendRuntimeDiagnostic({
+                source: 'stream-config',
+                message: `Please configure ${engine} API Key in options.`,
+                taskId,
+                mode: 'stream',
+                engine
+            });
             emitTaskEvent(tabId, taskId, 'TASK_ERROR', normalizeErrorForUI(`Error: Please configure ${engine} API Key in options.`));
             emitTaskDone(tabId, taskId, 'failed', { reason: `Please configure ${engine} API Key in options.` });
             taskDoneEmitted = true;
@@ -1383,6 +1582,13 @@ async function handleStreamTranslation(text, tabId, engine, targetLang, profile 
     } catch (e) {
         streamFailed = true;
         console.error('Stream translation error:', e);
+        appendRuntimeDiagnostic({
+            source: 'handleStreamTranslation',
+            message: e?.message || String(e),
+            taskId,
+            mode: 'stream',
+            engine
+        });
         emitTaskEvent(tabId, taskId, 'TASK_ERROR', normalizeErrorForUI(e));
         emitTaskDone(tabId, taskId, 'failed', { reason: e.message || 'Stream translation failed', source: 'stream' });
         taskDoneEmitted = true;

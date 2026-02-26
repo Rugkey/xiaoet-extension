@@ -48,6 +48,78 @@ const QUICK_PRESETS = {
     }
 };
 
+const SYNC_SETTINGS_KEYS = [
+    'translationEngine',
+    'translationModel',
+    'promptProfile',
+    'isDarkMode',
+    'pdfNewlines',
+    'bilingualMode',
+    'targetLang',
+    'glossaryEnabled',
+    'termGlossary',
+    'tmFuzzyEnabled',
+    'tmFuzzyThreshold',
+    'tmConflictPolicy',
+    'showAdvancedSettings',
+    'quickScenario',
+    'quickPriority',
+    'quickMemory',
+    'autoCaptureOnlinePdf',
+    'citationFriendlyMode',
+    'bigDocPerformanceMode',
+    'documentBatchSize',
+    'documentParallelRequests',
+    'glossaryDomain',
+    'onboardingCompleted',
+    'enableSettingsSync'
+];
+
+function buildSyncPayload(settings) {
+    const payload = {};
+    SYNC_SETTINGS_KEYS.forEach((key) => {
+        payload[key] = settings[key];
+    });
+    return payload;
+}
+
+function syncSettingsIfEnabled(settings) {
+    if (!chrome?.storage?.sync) return;
+    if (!settings.enableSettingsSync) {
+        chrome.storage.sync.remove(SYNC_SETTINGS_KEYS, () => {
+            if (chrome.runtime.lastError) {
+                console.debug('Failed to clear sync settings:', chrome.runtime.lastError.message);
+            }
+        });
+        return;
+    }
+    chrome.storage.sync.set(buildSyncPayload(settings), () => {
+        if (chrome.runtime.lastError) {
+            console.debug('Failed to sync settings:', chrome.runtime.lastError.message);
+        }
+    });
+}
+
+function mergeWithSyncIfNeeded(localItems, callback) {
+    if (!chrome?.storage?.sync) {
+        callback(localItems);
+        return;
+    }
+
+    chrome.storage.sync.get(buildSyncPayload(localItems), (syncItems) => {
+        if (chrome.runtime.lastError) {
+            console.debug('Failed to read sync settings:', chrome.runtime.lastError.message);
+            callback(localItems);
+            return;
+        }
+        if (syncItems && syncItems.enableSettingsSync) {
+            callback({ ...localItems, ...syncItems });
+            return;
+        }
+        callback(localItems);
+    });
+}
+
 function setTMEditStatus(message, level = '') {
     const box = document.getElementById('tmEditStatus');
     if (!box) return;
@@ -155,6 +227,7 @@ document.addEventListener('DOMContentLoaded', () => {
     bindQuickSetupActions();
     bindGlossaryActions();
     bindTMActions();
+    bindDiagnosticActions();
     bindTMEditModalActions();
 
     document.getElementById('saveBtn').addEventListener('click', saveOptions);
@@ -176,6 +249,16 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('clearHistoryBtn').addEventListener('click', clearHistory);
     document.getElementById('historySearch').addEventListener('input', (e) => {
         filterHistory(e.target.value);
+    });
+
+    document.getElementById('resetOnboardingBtn')?.addEventListener('click', () => {
+        chrome.storage.local.set({ onboardingCompleted: false }, () => {
+            if (chrome.runtime.lastError) {
+                console.error('重置引导状态失败:', chrome.runtime.lastError);
+                return;
+            }
+            setQuickSetupStatus('已重置新手引导，刷新任意页面后会再次出现提示。');
+        });
     });
 });
 
@@ -394,7 +477,15 @@ function saveOptions() {
         showAdvancedSettings: document.getElementById('showAdvancedSettings')?.checked !== false,
         quickScenario: document.getElementById('quickScenario')?.value || 'general',
         quickPriority: document.getElementById('quickPriority')?.value || 'balanced',
-        quickMemory: document.getElementById('quickMemory')?.value || 'on'
+        quickMemory: document.getElementById('quickMemory')?.value || 'on',
+        autoCaptureOnlinePdf: document.getElementById('autoCaptureOnlinePdf')?.checked !== false,
+        citationFriendlyMode: document.getElementById('citationFriendlyMode')?.checked !== false,
+        bigDocPerformanceMode: document.getElementById('bigDocPerformanceMode')?.checked !== false,
+        documentBatchSize: document.getElementById('bigDocPerformanceMode')?.checked !== false ? 6 : 10,
+        documentParallelRequests: document.getElementById('bigDocPerformanceMode')?.checked !== false ? 3 : 5,
+        glossaryDomain: document.getElementById('glossaryDomain')?.value || 'auto',
+        onboardingCompleted: true,
+        enableSettingsSync: document.getElementById('enableSettingsSync')?.checked !== false
     };
 
     chrome.storage.local.set(settings, () => {
@@ -404,6 +495,7 @@ function saveOptions() {
         }
 
         document.documentElement.setAttribute('data-theme', settings.isDarkMode ? 'dark' : 'light');
+        syncSettingsIfEnabled(settings);
 
         // Notify service worker so it clears cached translations
         chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED' });
@@ -435,57 +527,75 @@ function restoreOptions() {
         showAdvancedSettings: true,
         quickScenario: 'general',
         quickPriority: 'balanced',
-        quickMemory: 'on'
+        quickMemory: 'on',
+        autoCaptureOnlinePdf: true,
+        citationFriendlyMode: true,
+        bigDocPerformanceMode: true,
+        documentBatchSize: 6,
+        documentParallelRequests: 3,
+        glossaryDomain: 'auto',
+        onboardingCompleted: false,
+        enableSettingsSync: true
     }, (items) => {
         if (chrome.runtime.lastError) {
             console.error('Failed to load settings:', chrome.runtime.lastError);
             return;
         }
 
-        document.getElementById('deepseekKey').value = items.deepseekKey;
-        document.getElementById('openaiKey').value = items.openaiKey;
-        document.getElementById('deeplKey').value = items.deeplKey;
+        const hydrate = (effectiveItems) => {
+            document.getElementById('deepseekKey').value = effectiveItems.deepseekKey;
+            document.getElementById('openaiKey').value = effectiveItems.openaiKey;
+            document.getElementById('deeplKey').value = effectiveItems.deeplKey;
 
-        const engineSelect = document.getElementById('engineSelect');
-        engineSelect.value = items.translationEngine;
+            const engineSelect = document.getElementById('engineSelect');
+            engineSelect.value = effectiveItems.translationEngine;
 
-        document.getElementById('promptProfile').value = items.promptProfile || 'default';
+            document.getElementById('promptProfile').value = effectiveItems.promptProfile || 'default';
 
-        document.getElementById('darkModeToggle').checked = items.isDarkMode;
-        document.getElementById('pdfNewlines').checked = items.pdfNewlines;
-        document.getElementById('bilingualMode').checked = items.bilingualMode;
-        document.getElementById('targetLang').value = items.targetLang;
-        document.getElementById('glossaryEnabled').checked = items.glossaryEnabled !== false;
-        document.getElementById('glossaryInput').value = stringifyGlossary(items.termGlossary);
-        document.getElementById('tmFuzzyEnabled').checked = items.tmFuzzyEnabled !== false;
-        document.getElementById('tmFuzzyThreshold').value = Number(items.tmFuzzyThreshold || 0.82).toFixed(2);
-        if (document.getElementById('showAdvancedSettings')) {
-            document.getElementById('showAdvancedSettings').checked = items.showAdvancedSettings !== false;
-            applyAdvancedVisibility(items.showAdvancedSettings !== false);
-        }
-        if (document.getElementById('tmConflictPolicy')) {
-            document.getElementById('tmConflictPolicy').value = items.tmConflictPolicy || 'alwaysAsk';
-        }
-        updateTMThresholdLabel();
-        if (document.getElementById('quickScenario')) document.getElementById('quickScenario').value = items.quickScenario || 'general';
-        if (document.getElementById('quickPriority')) document.getElementById('quickPriority').value = items.quickPriority || 'balanced';
-        if (document.getElementById('quickMemory')) document.getElementById('quickMemory').value = items.quickMemory || 'on';
-        renderGlossaryStatus(parseGlossaryTextDetailed(document.getElementById('glossaryInput').value));
+            document.getElementById('darkModeToggle').checked = !!effectiveItems.isDarkMode;
+            document.getElementById('pdfNewlines').checked = effectiveItems.pdfNewlines !== false;
+            document.getElementById('bilingualMode').checked = !!effectiveItems.bilingualMode;
+            document.getElementById('targetLang').value = effectiveItems.targetLang;
+            document.getElementById('glossaryEnabled').checked = effectiveItems.glossaryEnabled !== false;
+            document.getElementById('glossaryInput').value = stringifyGlossary(effectiveItems.termGlossary);
+            document.getElementById('tmFuzzyEnabled').checked = effectiveItems.tmFuzzyEnabled !== false;
+            document.getElementById('tmFuzzyThreshold').value = Number(effectiveItems.tmFuzzyThreshold || 0.82).toFixed(2);
+            if (document.getElementById('showAdvancedSettings')) {
+                document.getElementById('showAdvancedSettings').checked = effectiveItems.showAdvancedSettings !== false;
+                applyAdvancedVisibility(effectiveItems.showAdvancedSettings !== false);
+            }
+            if (document.getElementById('tmConflictPolicy')) {
+                document.getElementById('tmConflictPolicy').value = effectiveItems.tmConflictPolicy || 'alwaysAsk';
+            }
+            if (document.getElementById('quickScenario')) document.getElementById('quickScenario').value = effectiveItems.quickScenario || 'general';
+            if (document.getElementById('quickPriority')) document.getElementById('quickPriority').value = effectiveItems.quickPriority || 'balanced';
+            if (document.getElementById('quickMemory')) document.getElementById('quickMemory').value = effectiveItems.quickMemory || 'on';
+            if (document.getElementById('autoCaptureOnlinePdf')) document.getElementById('autoCaptureOnlinePdf').checked = effectiveItems.autoCaptureOnlinePdf !== false;
+            if (document.getElementById('citationFriendlyMode')) document.getElementById('citationFriendlyMode').checked = effectiveItems.citationFriendlyMode !== false;
+            if (document.getElementById('bigDocPerformanceMode')) document.getElementById('bigDocPerformanceMode').checked = effectiveItems.bigDocPerformanceMode !== false;
+            if (document.getElementById('glossaryDomain')) document.getElementById('glossaryDomain').value = effectiveItems.glossaryDomain || 'auto';
+            if (document.getElementById('enableSettingsSync')) document.getElementById('enableSettingsSync').checked = effectiveItems.enableSettingsSync !== false;
 
-        updateModelList();
-        const modelSelect = document.getElementById('translationModel');
-        if ([...modelSelect.options].some(o => o.value === items.translationModel)) {
-            modelSelect.value = items.translationModel;
-        }
+            updateTMThresholdLabel();
+            renderGlossaryStatus(parseGlossaryTextDetailed(document.getElementById('glossaryInput').value));
 
-        const inferred = inferPresetFromQuickSetup();
-        markActivePreset(inferred);
-        setQuickSetupStatus(`当前推荐：${QUICK_PRESETS[inferred].label}。点击“按向导应用”可一键同步到下方参数。`);
+            updateModelList();
+            const modelSelect = document.getElementById('translationModel');
+            if ([...modelSelect.options].some(o => o.value === effectiveItems.translationModel)) {
+                modelSelect.value = effectiveItems.translationModel;
+            }
 
-        document.documentElement.setAttribute('data-theme', items.isDarkMode ? 'dark' : 'light');
+            const inferred = inferPresetFromQuickSetup();
+            markActivePreset(inferred);
+            setQuickSetupStatus(`当前推荐：${QUICK_PRESETS[inferred].label}。点击“按向导应用”可一键同步到下方参数。`);
 
-        loadTMStats();
-        loadTMList();
+            document.documentElement.setAttribute('data-theme', effectiveItems.isDarkMode ? 'dark' : 'light');
+
+            loadTMStats();
+            loadTMList();
+        };
+
+        mergeWithSyncIfNeeded(items, hydrate);
     });
 }
 
@@ -522,6 +632,57 @@ function bindGlossaryActions() {
     previewBtn?.addEventListener('click', runGlossaryPreview);
     glossaryInput?.addEventListener('blur', () => {
         renderGlossaryStatus(parseGlossaryTextDetailed(glossaryInput.value));
+    });
+}
+
+function bindDiagnosticActions() {
+    document.getElementById('diagnosticsRefreshBtn')?.addEventListener('click', loadDiagnostics);
+    document.getElementById('diagnosticsClearBtn')?.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ type: 'CLEAR_RUNTIME_DIAGNOSTICS' }, (res) => {
+            if (!res?.success) {
+                console.error('清空诊断失败:', res?.error || chrome.runtime.lastError?.message || 'unknown');
+                return;
+            }
+            loadDiagnostics();
+        });
+    });
+    loadDiagnostics();
+}
+
+function loadDiagnostics() {
+    const summary = document.getElementById('diagnosticsSummary');
+    const list = document.getElementById('diagnosticsList');
+    if (summary) summary.textContent = '正在加载诊断信息...';
+    if (list) list.value = '';
+
+    chrome.runtime.sendMessage({ type: 'GET_RUNTIME_DIAGNOSTICS' }, (res) => {
+        if (!res?.success) {
+            const msg = res?.error || chrome.runtime.lastError?.message || '未知错误';
+            if (summary) {
+                summary.classList.remove('success');
+                summary.classList.add('error');
+                summary.textContent = `加载失败：${msg}`;
+            }
+            return;
+        }
+
+        const items = Array.isArray(res.entries) ? res.entries : [];
+        const stats = res.stats || {};
+        if (summary) {
+            summary.classList.remove('error');
+            summary.classList.add('success');
+            summary.textContent = `最近错误 ${items.length} 条 ｜ 近 1 小时失败 ${stats.failedInHour || 0} 次 ｜ 最后错误：${stats.lastErrorAt ? new Date(stats.lastErrorAt).toLocaleString() : '无'}`;
+        }
+
+        if (list) {
+            list.value = items.map((item) => {
+                const time = item.ts ? new Date(item.ts).toLocaleString() : '未知时间';
+                const source = item.source || 'unknown';
+                const code = item.code || 'unknown';
+                const message = item.message || '';
+                return `[${time}] [${source}] [${code}] ${message}`;
+            }).join('\n');
+        }
     });
 }
 

@@ -57,7 +57,10 @@ const state = {
     scrollRAF: null,
     renderRAF: null,
     pageObserver: null,
-    thumbnailObserver: null
+    thumbnailObserver: null,
+    isSelectingText: false,
+    pendingZoomValue: null,
+    zoomApplyTimer: null
 };
 
 const elements = {
@@ -1276,6 +1279,8 @@ async function renderVisiblePages() {
 
 // Function to unrender a page to free up memory
 function unrenderPage(pageNum, pageEl) {
+    if (state.isSelectingText) return;
+
     // Clear canvas
     const canvas = pageEl.querySelector('canvas');
     if (canvas) {
@@ -2755,6 +2760,29 @@ function setupEvents() {
 
     setupSearchEvents();
 
+    const updateSelectingState = () => {
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+            state.isSelectingText = false;
+            if (state.pendingZoomValue !== null && state.pendingZoomValue !== undefined) {
+                const pending = state.pendingZoomValue;
+                state.pendingZoomValue = null;
+                updateZoom(pending);
+            }
+            return;
+        }
+
+        const anchorNode = sel.anchorNode;
+        const focusNode = sel.focusNode;
+        const anchorEl = anchorNode?.nodeType === Node.TEXT_NODE ? anchorNode.parentElement : anchorNode;
+        const focusEl = focusNode?.nodeType === Node.TEXT_NODE ? focusNode.parentElement : focusNode;
+        const insideTextLayer = !!(anchorEl?.closest?.('.textLayer') || focusEl?.closest?.('.textLayer'));
+        state.isSelectingText = insideTextLayer;
+    };
+
+    document.addEventListener('selectionchange', updateSelectingState);
+    document.addEventListener('mouseup', () => setTimeout(updateSelectingState, 0));
+
     elements.container?.addEventListener('pointerdown', (e) => {
         if (!(e.ctrlKey || e.metaKey)) return;
         if (e.button !== 0) return;
@@ -2829,8 +2857,7 @@ function setupEvents() {
         if (e.ctrlKey) {
             e.preventDefault();
             const direction = e.deltaY < 0 ? 1 : -1;
-            state.zoom = Math.min(Math.max(state.zoom + (direction * 0.1), 0.4), 5.0);
-            updateZoom();
+            updateZoom(state.zoom + (direction * 0.1));
         }
     }, { passive: false });
 
@@ -3362,6 +3389,11 @@ function setupEvents() {
 }
 
 async function updateZoom(value) {
+    if (state.isSelectingText) {
+        state.pendingZoomValue = value;
+        return;
+    }
+
     const oldZoom = state.zoom;
     const oldCurrentPage = state.currentPage;
     const oldPageEl = document.getElementById(`page-${oldCurrentPage}`);
@@ -3403,15 +3435,38 @@ async function updateZoom(value) {
     const zoomLabel = document.getElementById('zoomLevel'); // Unified with HTML
     if (zoomLabel) zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
 
-    await prepareLayout();
-    renderAllPages();
-
-    const newPageEl = document.getElementById(`page-${oldCurrentPage}`);
-    if (newPageEl) {
-        const ratio = oldZoom > 0 ? (state.zoom / oldZoom) : 1;
-        const nextTop = newPageEl.offsetTop + oldRelativeOffset * ratio;
-        elements.container.scrollTop = Math.max(0, nextTop);
+    if (state.zoomApplyTimer) {
+        clearTimeout(state.zoomApplyTimer);
+        state.zoomApplyTimer = null;
     }
+
+    elements.container.classList.add('zooming');
+    const nextZoom = state.zoom;
+
+    await new Promise((resolve) => {
+        state.zoomApplyTimer = setTimeout(async () => {
+            try {
+                if (nextZoom !== state.zoom) {
+                    resolve();
+                    return;
+                }
+
+                await prepareLayout();
+                renderAllPages();
+
+                const newPageEl = document.getElementById(`page-${oldCurrentPage}`);
+                if (newPageEl) {
+                    const ratio = oldZoom > 0 ? (state.zoom / oldZoom) : 1;
+                    const nextTop = newPageEl.offsetTop + oldRelativeOffset * ratio;
+                    elements.container.scrollTop = Math.max(0, nextTop);
+                }
+            } finally {
+                elements.container.classList.remove('zooming');
+                state.zoomApplyTimer = null;
+                resolve();
+            }
+        }, 80);
+    });
 }
 
 function setupSearchEvents() {

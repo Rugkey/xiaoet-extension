@@ -1011,6 +1011,16 @@
                 <h2>通用选项</h2>
                 <div class="form-group switch-row">
                     <div>
+                        <label>自动接管在线 PDF</label>
+                        <div class="desc">开启后会自动将在线 .pdf 链接跳转到学术阅读器；关闭后保持浏览器默认 PDF 阅读器。</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="autoCaptureOnlinePdf" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="form-group switch-row">
+                    <div>
                         <label>启用暗黑模式</label>
                         <div class="desc">跟随系统或手动开启暗黑视觉体验。</div>
                     </div>
@@ -1039,11 +1049,61 @@
                         <span class="slider"></span>
                     </label>
                 </div>
+                <div class="form-group switch-row">
+                    <div>
+                        <label>引文友好翻译</label>
+                        <div class="desc">自动保护参考文献编号、DOI、图表编号等结构，减少被误翻译。</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="citationFriendlyMode" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="form-group switch-row">
+                    <div>
+                        <label>大文档性能模式</label>
+                        <div class="desc">在长文档翻译时自动降低并发并分批处理，减少卡顿与失败率。</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="bigDocPerformanceMode" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="form-group switch-row">
+                    <div>
+                        <label>启用设置同步</label>
+                        <div class="desc">将非敏感设置同步到浏览器账号（API Key 不同步）。</div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="enableSettingsSync" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="form-group switch-row">
+                    <div>
+                        <label>新手引导提示</label>
+                        <div class="desc">首次使用时显示快捷键与入口提示，可随时重置。</div>
+                    </div>
+                    <button id="resetOnboardingBtn" class="btn-secondary" type="button">重置引导</button>
+                </div>
             </div>
 
             <div class="card advanced-settings-card" data-advanced-card="glossary">
                 <h2>术语库 (Glossary)</h2>
                 <div class="desc">用于强制术语一致性。每行一个映射，格式：<code>源词 => 目标词</code>。例如：<code>transformer => Transformer 模型</code></div>
+                <div class="form-group">
+                    <label for="glossaryDomain">术语增强领域包</label>
+                    <select id="glossaryDomain">
+                        <option value="none">不启用</option>
+                        <option value="auto">自动（跟随预设风格）</option>
+                        <option value="academic">学术</option>
+                        <option value="technical">技术</option>
+                        <option value="medical">医学</option>
+                        <option value="legal">法律</option>
+                        <option value="business">商务</option>
+                    </select>
+                    <div class="desc">在自定义术语库基础上自动补充常用领域术语映射。</div>
+                </div>
                 <div class="form-group switch-row">
                     <div>
                         <label>启用术语库强制替换</label>
@@ -1128,6 +1188,17 @@
                         <div class="tm-empty">正在加载记忆条目...</div>
                     </div>
                 </div>
+            </div>
+
+            <div class="card advanced-settings-card" data-advanced-card="diagnostics">
+                <h2>运行诊断</h2>
+                <div class="desc">用于快速定位失败原因，记录最近后台错误事件（不含隐私原文全文）。</div>
+                <div class="inline-actions">
+                    <button id="diagnosticsRefreshBtn" class="btn-secondary" type="button">刷新诊断</button>
+                    <button id="diagnosticsClearBtn" class="btn-secondary" type="button">清空诊断</button>
+                </div>
+                <div id="diagnosticsSummary" class="status-box" style="margin-top:10px;">正在加载诊断信息...</div>
+                <textarea id="diagnosticsList" readonly placeholder="最近错误日志会显示在这里"></textarea>
             </div>
 
             <div class="action-bar">

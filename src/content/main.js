@@ -97,13 +97,19 @@ if (!ui) {
         translationEngine: 'google',
         targetLang: 'zh-CN',
         promptProfile: 'default',
-        isDarkMode: false
+        isDarkMode: false,
+        onboardingCompleted: false
     }, (items) => {
         state.settings = items;
         if (items.translationEngine) ui.engine = items.translationEngine;
         if (items.targetLang) ui.targetLang = items.targetLang;
         // Sync dark mode to ShadowDOM host
         applyDarkMode(items.isDarkMode);
+
+        if (!items.onboardingCompleted) {
+            showNotice('欢迎使用学术大拿：选中文本可翻译，Alt+Shift+X（或 Ctrl+Shift+X）快捷翻译，设置页可配置引擎。', 'info');
+            Utils.setSettings({ onboardingCompleted: true });
+        }
     });
 
     // Live settings sync: listen for settings changes from other tabs/options page

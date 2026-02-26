@@ -406,6 +406,10 @@ input,
     justify-content: center;
 }
 
+.pdf-scroller.zooming {
+    scroll-behavior: auto;
+}
+
 .pdf-canvas-layer {
     display: flex;
     flex-direction: column;
