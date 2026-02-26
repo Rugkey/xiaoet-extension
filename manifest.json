@@ -1,6 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AcadMaster",
+  "short_name": "AcadMaster",
   "version": "2.2.0",
   "description": "学术大拿 - 你的科研翻译助手",
   "permissions": [
@@ -101,10 +102,5 @@
       ],
       "all_frames": false
     }
-  ],
-  "icons": {
-    "16": "icons/icon16.svg",
-    "48": "icons/icon48.svg",
-    "128": "icons/icon128.svg"
-  }
+  ]
 }
