@@ -57,7 +57,18 @@ const state = {
     scrollRAF: null,
     renderRAF: null,
     pageObserver: null,
+    visiblePageRatios: {},
     thumbnailObserver: null,
+    isFullscreen: false,
+    manualRegionExportArmed: false,
+    /** 手动选区状态 — 拖选期间完全接管浏览器选区 */
+    manualSel: {
+        active: false,       // 是否正在手动拖选
+        anchorNode: null,    // 锚点文本节点
+        anchorOffset: 0,     // 锚点偏移量
+        range: null,         // 当前构建的 Range
+        startPage: null      // 锚点所在页码
+    },
     isSelectingText: false,
     pendingZoomValue: null,
     zoomApplyTimer: null
@@ -116,17 +127,332 @@ function simpleHashLocal(str) {
     return (hash >>> 0).toString(16);
 }
 
+function downloadBlobFile(blob, fileName) {
+    if (!blob) return;
+    const a = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function sanitizeFileStem(name) {
+    let raw = String(name || 'document');
+    // 兼容 file 参数中携带的 URL 编码文件名（如 %E6%B5%B7...）
+    // 最多解码两次，避免异常输入导致死循环。
+    for (let i = 0; i < 2; i++) {
+        try {
+            const next = decodeURIComponent(raw.replace(/\+/g, ' '));
+            if (next === raw) break;
+            raw = next;
+        } catch {
+            break;
+        }
+    }
+    raw = raw.replace(/\.pdf$/i, '');
+    const cleaned = raw.replace(/[\\/:*?"<>|\s]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+    return cleaned || 'document';
+}
+
+function padNum(value, size = 4) {
+    return String(Math.max(0, Number(value || 0))).padStart(size, '0');
+}
+
+function buildExportImageFileName(opts = {}) {
+    const stem = sanitizeFileStem(state.fileName || 'document');
+    const pagePart = `p${padNum(opts.page, 4)}`;
+    const kind = opts.kind || 'img';
+    const indexPart = opts.index ? `_${kind}${padNum(opts.index, 3)}` : `_${kind}`;
+    const sizePart = (opts.width && opts.height) ? `_${opts.width}x${opts.height}` : '';
+    const extra = opts.extra ? `_${String(opts.extra).replace(/[^a-zA-Z0-9_-]/g, '')}` : '';
+    return `${stem}_${pagePart}${indexPart}${sizePart}${extra}.png`;
+}
+
+async function renderPageCanvasForExport(pageNum, exportScale = 2.5) {
+    if (!state.pdf) return null;
+    const page = await state.pdf.getPage(pageNum);
+    const viewport = page.getViewport({ scale: Math.max(1, Number(exportScale || 2.5)) });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.floor(viewport.width));
+    canvas.height = Math.max(1, Math.floor(viewport.height));
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return null;
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return canvas;
+}
+
+function normalizeRawImageToCanvas(imageLike) {
+    if (!imageLike) return null;
+
+    if (imageLike instanceof HTMLCanvasElement) {
+        return imageLike;
+    }
+
+    if (typeof ImageBitmap !== 'undefined' && imageLike instanceof ImageBitmap) {
+        const canvas = document.createElement('canvas');
+        canvas.width = imageLike.width;
+        canvas.height = imageLike.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return null;
+        ctx.drawImage(imageLike, 0, 0);
+        return canvas;
+    }
+
+    if (imageLike instanceof HTMLImageElement) {
+        const canvas = document.createElement('canvas');
+        canvas.width = imageLike.naturalWidth || imageLike.width;
+        canvas.height = imageLike.naturalHeight || imageLike.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return null;
+        ctx.drawImage(imageLike, 0, 0);
+        return canvas;
+    }
+
+    const width = Number(imageLike.width || 0);
+    const height = Number(imageLike.height || 0);
+    const data = imageLike.data;
+    if (!width || !height || !data) return null;
+
+    const src = data instanceof Uint8ClampedArray ? data : new Uint8ClampedArray(data);
+    let rgba;
+    if (src.length === width * height * 4) {
+        rgba = src;
+    } else if (src.length === width * height * 3) {
+        rgba = new Uint8ClampedArray(width * height * 4);
+        for (let i = 0, j = 0; i < src.length; i += 3, j += 4) {
+            rgba[j] = src[i];
+            rgba[j + 1] = src[i + 1];
+            rgba[j + 2] = src[i + 2];
+            rgba[j + 3] = 255;
+        }
+    } else if (src.length === width * height) {
+        rgba = new Uint8ClampedArray(width * height * 4);
+        for (let i = 0, j = 0; i < src.length; i++, j += 4) {
+            const g = src[i];
+            rgba[j] = g;
+            rgba[j + 1] = g;
+            rgba[j + 2] = g;
+            rgba[j + 3] = 255;
+        }
+    } else {
+        return null;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.putImageData(new ImageData(rgba, width, height), 0, 0);
+    return canvas;
+}
+
+function getPageObjAsync(page, objId) {
+    return new Promise((resolve) => {
+        let resolved = false;
+        const done = (obj) => {
+            if (resolved) return;
+            resolved = true;
+            resolve(obj || null);
+        };
+
+        // 超时兜底，避免某些对象回调不触发导致卡住
+        const timer = setTimeout(() => done(null), 1200);
+
+        try {
+            page.objs?.get?.(objId, (obj) => {
+                clearTimeout(timer);
+                done(obj);
+            });
+
+            // 某些资源在 commonObjs 中
+            page.commonObjs?.get?.(objId, (obj) => {
+                clearTimeout(timer);
+                done(obj);
+            });
+        } catch {
+            clearTimeout(timer);
+            done(null);
+        }
+    });
+}
+
+async function extractImagesFromPage(pageNum) {
+    if (!state.pdf) return [];
+    const page = await state.pdf.getPage(pageNum);
+    const operatorList = await page.getOperatorList();
+    const OPS = pdfjsLib.OPS || {};
+    const imageFns = new Set([
+        OPS.paintImageXObject,
+        OPS.paintInlineImageXObject,
+        OPS.paintJpegXObject,
+        OPS.paintImageXObjectRepeat,
+        OPS.paintImageMaskXObject,
+        OPS.paintImageMaskXObjectRepeat
+    ]);
+
+    const results = [];
+    const dedupe = new Set();
+    let hitImageOps = 0;
+
+    for (let i = 0; i < operatorList.fnArray.length; i++) {
+        const fn = operatorList.fnArray[i];
+        if (!imageFns.has(fn)) continue;
+        hitImageOps += 1;
+        const args = operatorList.argsArray[i] || [];
+        let imageLike = null;
+
+        if (fn === OPS.paintInlineImageXObject || fn === OPS.paintImageMaskXObject) {
+            imageLike = args[0] || null;
+        } else if (fn === OPS.paintImageXObjectRepeat || fn === OPS.paintImageMaskXObjectRepeat) {
+            imageLike = args[1] || args[0] || null;
+        } else {
+            const objId = args[0];
+            if (!objId) continue;
+            imageLike = await getPageObjAsync(page, objId);
+        }
+
+        const canvas = normalizeRawImageToCanvas(imageLike);
+        if (!canvas || canvas.width < 8 || canvas.height < 8) continue;
+
+        const thumbCtx = canvas.getContext('2d', { willReadFrequently: true });
+        let signature = 'na';
+        if (thumbCtx) {
+            const sampleW = Math.min(16, canvas.width);
+            const sampleH = Math.min(16, canvas.height);
+            const sample = thumbCtx.getImageData(0, 0, sampleW, sampleH).data;
+            let sum = 0;
+            for (let s = 0; s < sample.length; s += 8) {
+                sum = (sum + sample[s] + sample[s + 1] + sample[s + 2] + sample[s + 3]) >>> 0;
+            }
+            signature = String(sum);
+        }
+        const key = `${canvas.width}x${canvas.height}-${signature}`;
+        if (dedupe.has(key)) continue;
+        dedupe.add(key);
+
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+        if (!blob) continue;
+        results.push({
+            blob,
+            width: canvas.width,
+            height: canvas.height
+        });
+    }
+
+    // 某些 PDF 图像以复杂对象/遮罩存储，操作符命中但对象取不到。
+    // 这时提供“整页无损兜底”，保证自动导出有结果。
+    if (results.length === 0 && hitImageOps > 0) {
+        const fallbackCanvas = await renderPageCanvasForExport(pageNum, 2.5);
+        if (fallbackCanvas) {
+            const fallbackBlob = await new Promise((resolve) => fallbackCanvas.toBlob(resolve, 'image/png'));
+            if (fallbackBlob) {
+                results.push({
+                    blob: fallbackBlob,
+                    width: fallbackCanvas.width,
+                    height: fallbackCanvas.height,
+                    isFallback: true
+                });
+            }
+        }
+    }
+
+    return results;
+}
+
 function getDocId() {
     const hashFn = typeof window.simpleHash === 'function' ? window.simpleHash : simpleHashLocal;
     return hashFn(state.fileUrl || state.fileName || 'default-pdf');
 }
 
+const STORAGE_KEY_PREFIX = 'acadmaster_pdf';
+const LEGACY_STORAGE_KEY_PREFIX = 'xiaoet_pdf';
+
+function readLocalStorageWithLegacy(primaryKey, legacyKey) {
+    const primaryRaw = localStorage.getItem(primaryKey);
+    if (primaryRaw) {
+        return { raw: primaryRaw, usedLegacy: false };
+    }
+    if (!legacyKey) {
+        return { raw: null, usedLegacy: false };
+    }
+    const legacyRaw = localStorage.getItem(legacyKey);
+    if (!legacyRaw) {
+        return { raw: null, usedLegacy: false };
+    }
+    try {
+        localStorage.setItem(primaryKey, legacyRaw);
+    } catch {
+        // ignore migration failure
+    }
+    return { raw: legacyRaw, usedLegacy: true };
+}
+
 function getAnnotationStorageKey() {
-    return `xiaoet_pdf_annotations_${getDocId()}`;
+    return `${STORAGE_KEY_PREFIX}_annotations_${getDocId()}`;
+}
+
+function getLegacyAnnotationStorageKey() {
+    return `${LEGACY_STORAGE_KEY_PREFIX}_annotations_${getDocId()}`;
 }
 
 function getTextIndexStorageKey() {
-    return `xiaoet_pdf_text_index_${getDocId()}`;
+    return `${STORAGE_KEY_PREFIX}_text_index_${getDocId()}`;
+}
+
+function getLegacyTextIndexStorageKey() {
+    return `${LEGACY_STORAGE_KEY_PREFIX}_text_index_${getDocId()}`;
+}
+
+function applyAdaptiveRenderLimit() {
+    let limit = 10;
+    const memory = Number(navigator.deviceMemory || 0);
+
+    if (Number.isFinite(memory) && memory > 0) {
+        if (memory <= 2) limit = 4;
+        else if (memory <= 4) limit = 6;
+        else if (memory >= 8) limit = 14;
+    } else {
+        const cores = Number(navigator.hardwareConcurrency || 0);
+        if (Number.isFinite(cores) && cores > 0) {
+            if (cores <= 4) limit = 8;
+            else if (cores >= 12) limit = 12;
+        }
+    }
+
+    if (state.pdf && Number.isFinite(state.pdf.numPages)) {
+        limit = Math.min(limit, Math.max(4, Math.min(24, state.pdf.numPages)));
+    }
+
+    state.maxRenderedPages = limit;
+}
+
+function syncFullscreenUI() {
+    const btnFullscreen = document.getElementById('btnFullscreen');
+    state.isFullscreen = !!document.fullscreenElement;
+    document.body.classList.toggle('fullscreen-mode', state.isFullscreen);
+
+    if (btnFullscreen) {
+        btnFullscreen.classList.toggle('active', state.isFullscreen);
+        btnFullscreen.title = state.isFullscreen ? '退出全屏 (F11)' : '全屏 (F11)';
+        btnFullscreen.setAttribute('aria-label', state.isFullscreen ? '退出全屏' : '进入全屏');
+    }
+}
+
+async function toggleFullscreen() {
+    try {
+        if (!document.fullscreenElement) {
+            await document.documentElement.requestFullscreen();
+        } else {
+            await document.exitFullscreen();
+        }
+    } catch (error) {
+        console.warn('全屏切换失败:', error);
+        showAnnoActionToast('全屏切换失败', 'warning');
+    }
 }
 
 function scheduleTextIndexSave() {
@@ -154,14 +480,17 @@ function saveTextIndexNow() {
 
 function loadTextIndexCacheFromStorage() {
     try {
-        const raw = localStorage.getItem(getTextIndexStorageKey());
+        const key = getTextIndexStorageKey();
+        const legacyKey = getLegacyTextIndexStorageKey();
+        const { raw } = readLocalStorageWithLegacy(key, legacyKey);
         if (!raw) return;
         const parsed = JSON.parse(raw);
 
         const isVersionOk = Number(parsed?.version) === TEXT_INDEX_CACHE_VERSION;
         const isNameOk = !parsed?.fileName || parsed.fileName === state.fileName;
         if (!isVersionOk || !isNameOk) {
-            localStorage.removeItem(getTextIndexStorageKey());
+            localStorage.removeItem(key);
+            localStorage.removeItem(legacyKey);
             return;
         }
 
@@ -539,7 +868,8 @@ function saveAnnotationsNow() {
 
 function loadAnnotationsFromStorage() {
     try {
-        const raw = localStorage.getItem(getAnnotationStorageKey());
+        const key = getAnnotationStorageKey();
+        const { raw } = readLocalStorageWithLegacy(key, getLegacyAnnotationStorageKey());
         if (!raw) return;
         const parsed = normalizeAnnotationStore(JSON.parse(raw));
         Object.keys(parsed).forEach(page => {
@@ -587,11 +917,19 @@ function highlightSnippet(snippet, query) {
 }
 
 function getSearchHistoryKey() {
+    return 'acadmaster_pdf_search_history_v1';
+}
+
+function getLegacySearchHistoryKey() {
     return 'xiaoet_pdf_search_history_v1';
 }
 
 function getSearchSessionKey() {
-    return `xiaoet_pdf_search_session_${getDocId()}`;
+    return `${STORAGE_KEY_PREFIX}_search_session_${getDocId()}`;
+}
+
+function getLegacySearchSessionKey() {
+    return `${LEGACY_STORAGE_KEY_PREFIX}_search_session_${getDocId()}`;
 }
 
 function saveSearchSessionNow() {
@@ -621,14 +959,17 @@ function scheduleSearchSessionSave() {
 
 function loadSearchSession() {
     try {
-        const raw = localStorage.getItem(getSearchSessionKey());
+        const key = getSearchSessionKey();
+        const legacyKey = getLegacySearchSessionKey();
+        const { raw } = readLocalStorageWithLegacy(key, legacyKey);
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         if (!parsed || typeof parsed !== 'object') return null;
 
         const savedAt = Number(parsed.savedAt || 0);
         if (!savedAt || (Date.now() - savedAt) > SEARCH_SESSION_TTL_MS) {
-            localStorage.removeItem(getSearchSessionKey());
+            localStorage.removeItem(key);
+            localStorage.removeItem(legacyKey);
             return null;
         }
 
@@ -658,6 +999,7 @@ function clearSearchSession(options = {}) {
 
     try {
         localStorage.removeItem(getSearchSessionKey());
+        localStorage.removeItem(getLegacySearchSessionKey());
     } catch {
         // ignore
     }
@@ -705,7 +1047,7 @@ function showSearchSessionNotice(message, duration = 2200) {
 
 function loadSearchHistory() {
     try {
-        const raw = localStorage.getItem(getSearchHistoryKey());
+        const { raw } = readLocalStorageWithLegacy(getSearchHistoryKey(), getLegacySearchHistoryKey());
         const arr = JSON.parse(raw || '[]');
         if (!Array.isArray(arr)) {
             state.searchHistory = [];
@@ -1169,10 +1511,7 @@ async function init() {
         // 某些 file:// 或跨域资源无法 HEAD，忽略即可
     }
 
-    if (typeof navigator.deviceMemory === 'number') {
-        if (navigator.deviceMemory <= 4) state.maxRenderedPages = 6;
-        else if (navigator.deviceMemory >= 8) state.maxRenderedPages = 14;
-    }
+    applyAdaptiveRenderLimit();
 
     // Set worker source
     pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('src/pdf/build/pdf.worker.js');
@@ -1204,6 +1543,7 @@ async function init() {
         };
 
         state.pdf = await loadingTask.promise;
+        applyAdaptiveRenderLimit();
 
         elements.pageTotal.textContent = `/ ${state.pdf.numPages}`;
         try {
@@ -1239,44 +1579,6 @@ async function init() {
     }
 }
 
-// Optimized rendering: only render what's near the viewport
-async function renderVisiblePages() {
-    const threshold = state.visiblePageThreshold; // Render pages within threshold screen heights
-    const containerHeight = elements.container.clientHeight;
-
-    for (let i = 1; i <= state.pdf.numPages; i++) {
-        const pageEl = document.getElementById(`page-${i}`);
-        if (!pageEl) continue;
-
-        const rect = pageEl.getBoundingClientRect();
-        const scrollerRect = elements.container.getBoundingClientRect();
-
-        // Relative to scroller top
-        const relTop = rect.top - scrollerRect.top;
-        const relBottom = rect.bottom - scrollerRect.top;
-
-        if (relBottom > -containerHeight * threshold && relTop < containerHeight * (1 + threshold)) {
-            const canvas = pageEl.querySelector('canvas');
-            const textLayer = pageEl.querySelector('.textLayer');
-            if (canvas && textLayer && !pageEl.dataset.rendered) {
-                // Check if we're within the page limit
-                if (state.renderedPages.size < state.maxRenderedPages) {
-                    pageEl.dataset.rendered = "true";
-                    state.renderedPages.add(i);
-                    renderPage(i, canvas, textLayer);
-                } else {
-                    console.debug('Max rendered pages reached, skipping page', i);
-                }
-            }
-        } else {
-            // Unrender pages that are out of view if we exceed the limit
-            if (state.renderedPages.has(i) && state.renderedPages.size > state.maxRenderedPages * 0.7) {
-                unrenderPage(i, pageEl);
-            }
-        }
-    }
-}
-
 // Function to unrender a page to free up memory
 function unrenderPage(pageNum, pageEl) {
     if (state.isSelectingText) return;
@@ -1309,15 +1611,85 @@ function unrenderPage(pageNum, pageEl) {
     console.debug('Unrendered page', pageNum, 'to manage memory');
 }
 
+function updateCurrentPageByObserver() {
+    const ratioEntries = Object.entries(state.visiblePageRatios || {});
+    if (!ratioEntries.length) return;
+
+    const containerRect = elements.container?.getBoundingClientRect?.();
+    const centerY = containerRect ? (containerRect.top + containerRect.height / 2) : null;
+    const centerCandidates = [];
+
+    let bestPage = null;
+    let bestRatio = 0;
+
+    ratioEntries.forEach(([page, ratio]) => {
+        const pageNum = Number(page);
+        const score = Number(ratio || 0);
+        if (!Number.isFinite(pageNum) || !Number.isFinite(score) || score <= 0) return;
+
+        if (centerY !== null) {
+            const pageEl = document.getElementById(`page-${pageNum}`);
+            if (pageEl) {
+                const rect = pageEl.getBoundingClientRect();
+                const isCrossingCenter = rect.top <= centerY && rect.bottom >= centerY;
+                if (isCrossingCenter) {
+                    const visualCenter = (rect.top + rect.bottom) / 2;
+                    centerCandidates.push({
+                        pageNum,
+                        ratio: score,
+                        distance: Math.abs(visualCenter - centerY)
+                    });
+                }
+            }
+        }
+
+        if (score > bestRatio || (score === bestRatio && (bestPage === null || pageNum < bestPage))) {
+            bestRatio = score;
+            bestPage = pageNum;
+        }
+    });
+
+    if (centerCandidates.length > 0) {
+        const currentOnCenter = centerCandidates.some(item => item.pageNum === state.currentPage);
+        if (currentOnCenter) {
+            bestPage = state.currentPage;
+        } else {
+            centerCandidates.sort((a, b) => {
+                if (a.distance !== b.distance) return a.distance - b.distance;
+                if (a.ratio !== b.ratio) return b.ratio - a.ratio;
+                return a.pageNum - b.pageNum;
+            });
+            bestPage = centerCandidates[0].pageNum;
+        }
+    }
+
+    if (!bestPage || state.currentPage === bestPage) return;
+
+    state.currentPage = bestPage;
+    if (elements.pageNumber) {
+        elements.pageNumber.value = String(bestPage);
+    }
+    updateOutlineActive(bestPage);
+}
+
 function setupPageVisibilityObserver() {
     if (state.pageObserver) {
         state.pageObserver.disconnect();
+    }
+
+    state.visiblePageRatios = {};
+
+    const thresholds = [];
+    for (let i = 0; i <= 20; i++) {
+        thresholds.push(i / 20);
     }
 
     state.pageObserver = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             const pageNum = parseInt(entry.target.dataset.pageNumber, 10);
             if (Number.isNaN(pageNum)) return;
+
+            state.visiblePageRatios[pageNum] = entry.isIntersecting ? entry.intersectionRatio : 0;
 
             if (entry.isIntersecting) {
                 const canvas = entry.target.querySelector('canvas');
@@ -1331,18 +1703,31 @@ function setupPageVisibilityObserver() {
                 unrenderPage(pageNum, entry.target);
             }
         });
+
+        updateCurrentPageByObserver();
     }, {
         root: elements.container,
         rootMargin: '150% 0px 150% 0px',
-        threshold: 0.01
+        threshold: thresholds
     });
 
     document.querySelectorAll('.page-container').forEach(pageEl => state.pageObserver.observe(pageEl));
 }
 
 async function renderAllPages() {
-    await renderVisiblePages();
     setupPageVisibilityObserver();
+
+    const currentPage = Math.min(Math.max(state.currentPage || 1, 1), state.pdf?.numPages || 1);
+    const pageEl = document.getElementById(`page-${currentPage}`);
+    if (!pageEl || pageEl.dataset.rendered || state.renderedPages.size >= state.maxRenderedPages) return;
+
+    const canvas = pageEl.querySelector('canvas');
+    const textLayer = pageEl.querySelector('.textLayer');
+    if (!canvas || !textLayer) return;
+
+    pageEl.dataset.rendered = 'true';
+    state.renderedPages.add(currentPage);
+    renderPage(currentPage, canvas, textLayer);
 }
 
 async function renderPage(num, canvas, textLayer) {
@@ -1728,7 +2113,13 @@ const drawingState = {
     lassoCurrent: null,
     lassoPageRect: null,
     lassoPointerId: null,
-    lassoAdditive: false
+    lassoAdditive: false,
+    isExportSelecting: false,
+    exportBoxEl: null,
+    exportPage: null,
+    exportStart: null,
+    exportCurrent: null,
+    exportPointerId: null
 };
 
 const annotationSelection = {
@@ -1830,6 +2221,297 @@ function redrawLayer(pageNum) {
         }
     });
     updateAnnotationSelectionUI();
+}
+
+/**
+ * 逐 span 精确提取选中区域的矩形（纯 Range 版本）。
+ * 遍历 textLayer 每个 <span>，对完全选中的 span 直接取 getBoundingClientRect()，
+ * 对部分选中的首尾 span 创建子范围取 rect，避免跨 span 碎片化/重叠问题。
+ * @param {Range} range - 选区 Range
+ * @param {Element} textLayer - 文本层 DOM 节点
+ * @param {DOMRect} containerRect - 页面容器的 bounding rect
+ */
+function getSelectedSpanRects(range, textLayer, containerRect) {
+    const spans = textLayer.querySelectorAll('span');
+    const rects = [];
+
+    for (const span of spans) {
+        // 跳过不与 Range 相交的 span
+        try {
+            if (!range.intersectsNode(span)) continue;
+        } catch { continue; }
+
+        const spanRect = span.getBoundingClientRect();
+        if (spanRect.width < 0.5 || spanRect.height < 0.5) continue;
+
+        // 判断是否完全选中：range 的 start 在 span 前面，end 在 span 后面
+        const spanRange = document.createRange();
+        spanRange.selectNodeContents(span);
+        const startsBefore = range.compareBoundaryPoints(Range.START_TO_START, spanRange) <= 0;
+        const endsAfter = range.compareBoundaryPoints(Range.END_TO_END, spanRange) >= 0;
+        const fullySelected = startsBefore && endsAfter;
+
+        if (fullySelected) {
+            // 完整选中 — 直接用 span 的 boundingRect，绝对精确
+            rects.push({
+                left: spanRect.left - containerRect.left,
+                top: spanRect.top - containerRect.top,
+                width: spanRect.width,
+                height: spanRect.height
+            });
+        } else {
+            // 部分选中（选区的首 / 尾 span）— 创建裁剪后的子范围
+            try {
+                const subRange = document.createRange();
+                subRange.selectNodeContents(span);
+
+                // 裁剪起点：如果选区起点在此 span 内部，使用选区起点
+                if (range.startContainer === span ||
+                    span.contains(range.startContainer)) {
+                    if (range.compareBoundaryPoints(Range.START_TO_START, subRange) > 0) {
+                        subRange.setStart(range.startContainer, range.startOffset);
+                    }
+                }
+                // 裁剪终点：如果选区终点在此 span 内部，使用选区终点
+                if (range.endContainer === span ||
+                    span.contains(range.endContainer)) {
+                    if (range.compareBoundaryPoints(Range.END_TO_END, subRange) < 0) {
+                        subRange.setEnd(range.endContainer, range.endOffset);
+                    }
+                }
+
+                // 对单个 span 的子范围，getClientRects 只返回 1 个矩形
+                const subRects = subRange.getClientRects();
+                for (const r of subRects) {
+                    if (r.width < 0.5 || r.height < 0.5) continue;
+                    rects.push({
+                        left: r.left - containerRect.left,
+                        top: r.top - containerRect.top,
+                        width: r.width,
+                        height: spanRect.height  // 统一用 span 高度，避免行高抖动
+                    });
+                }
+            } catch {
+                // 容错：子范围创建失败时回退到整个 span
+                rects.push({
+                    left: spanRect.left - containerRect.left,
+                    top: spanRect.top - containerRect.top,
+                    width: spanRect.width,
+                    height: spanRect.height
+                });
+            }
+        }
+    }
+
+    return rects;
+}
+
+function getClosestTextSpan(node) {
+    if (!node) return null;
+    const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+    if (!(element instanceof Element)) return null;
+    const span = element.closest('span');
+    if (!span) return null;
+    if (!(span.parentElement instanceof Element) || !span.parentElement.classList.contains('textLayer')) return null;
+    return span;
+}
+
+function getFirstTextNode(element) {
+    if (!element) return null;
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    return walker.nextNode();
+}
+
+function getLastTextNode(element) {
+    if (!element) return null;
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let last = null;
+    while (walker.nextNode()) {
+        last = walker.currentNode;
+    }
+    return last;
+}
+
+function getMedian(values) {
+    if (!values || values.length === 0) return 0;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    if (sorted.length % 2 === 0) return (sorted[mid - 1] + sorted[mid]) / 2;
+    return sorted[mid];
+}
+
+
+/**
+ * 从屏幕坐标 (x,y) 获取 textLayer 内的 caret 位置。
+ * 返回 { node, offset, span } 或 null（命中非 textLayer 区域时）。
+ */
+function caretFromPoint(x, y) {
+    let caretRange;
+    if (document.caretRangeFromPoint) {
+        caretRange = document.caretRangeFromPoint(x, y);
+    } else if (document.caretPositionFromPoint) {
+        const pos = document.caretPositionFromPoint(x, y);
+        if (pos) {
+            caretRange = document.createRange();
+            caretRange.setStart(pos.offsetNode, pos.offset);
+            caretRange.collapse(true);
+        }
+    }
+    if (!caretRange) return null;
+
+    const node = caretRange.startContainer;
+    const offset = caretRange.startOffset;
+    const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+    const span = el?.closest?.('.textLayer > span');
+    if (!span) return null;
+
+    return { node, offset, span };
+}
+
+/**
+ * 从锚点  终点构建 Range，自动处理前后顺序。
+ * anchorNode/anchorOffset 是 mousedown 时记录的锚点，
+ * extentNode/extentOffset 是实时鼠标对应的 caret 位置。
+ */
+function buildManualRange(anchorNode, anchorOffset, extentNode, extentOffset) {
+    if (!anchorNode || !extentNode) return null;
+    const range = document.createRange();
+    try {
+        // 暂时以 anchorextent 方向设置
+        range.setStart(anchorNode, anchorOffset);
+        range.setEnd(extentNode, extentOffset);
+    } catch {
+        return null;
+    }
+
+    // 如果 collapsed，说明 extent 在 anchor 前面，交换
+    if (range.collapsed) {
+        try {
+            range.setStart(extentNode, extentOffset);
+            range.setEnd(anchorNode, anchorOffset);
+        } catch {
+            return null;
+        }
+    }
+    if (range.collapsed) return null;
+    return range;
+}
+
+/**
+ * 渲染手动选区覆盖层  从 state.manualSel.range 读取 Range，
+ * 复用 getSelectedSpanRects + mergeHighlightRects 绘制 .sel-rect。
+ */
+function renderManualSelection() {
+    clearSelectionOverlay();
+
+    const range = state.manualSel.range;
+    if (!range || range.collapsed) return;
+
+    document.querySelectorAll('.page-container').forEach(pageContainer => {
+        const textLayer = pageContainer.querySelector('.textLayer');
+        if (!textLayer) return;
+        try {
+            if (!range.intersectsNode(textLayer)) return;
+        } catch { return; }
+
+        const selLayer = pageContainer.querySelector('.selection-layer');
+        if (!selLayer) return;
+
+        const containerRect = pageContainer.getBoundingClientRect();
+        const rawRects = getSelectedSpanRects(range, textLayer, containerRect);
+        const merged = mergeHighlightRects(rawRects);
+
+        const frag = document.createDocumentFragment();
+        for (const rect of merged) {
+            const div = document.createElement('div');
+            div.className = 'sel-rect';
+            div.style.left = rect.left + 'px';
+            div.style.top = rect.top + 'px';
+            div.style.width = rect.width + 'px';
+            div.style.height = rect.height + 'px';
+            frag.appendChild(div);
+        }
+        selLayer.appendChild(frag);
+    });
+}
+
+function clearSelectionOverlay() {
+    document.querySelectorAll('.selection-layer').forEach(layer => {
+        if (layer.childNodes.length) layer.innerHTML = '';
+    });
+}
+
+/**
+ * 将手动构建的 Range 同步到浏览器原生 Selection，
+ * 供 Ctrl+C 复制和翻译/批注消费。
+ */
+function commitManualSelection() {
+    const range = state.manualSel.range;
+    const sel = window.getSelection();
+    if (!sel) return;
+    sel.removeAllRanges();
+    if (range && !range.collapsed) {
+        sel.addRange(range.cloneRange());
+    }
+}
+
+/**
+ * 合并高亮矩形：按行分组，同一行内水平合并相邻矩形，
+ * 输出每行一个干净的矩形条带。
+ */
+function mergeHighlightRects(rects) {
+    if (!rects || rects.length === 0) return [];
+
+    const sorted = rects.slice().sort((a, b) => a.top - b.top || a.left - b.left);
+
+    // 按行分组（top 差距 < 行高 50% 视为同行）
+    const lines = [];
+    let currentLine = [sorted[0]];
+
+    for (let i = 1; i < sorted.length; i++) {
+        const ref = currentLine[0];
+        const cur = sorted[i];
+        const lineH = Math.max(ref.height, cur.height);
+        if (Math.abs(cur.top - ref.top) < lineH * 0.5) {
+            currentLine.push(cur);
+        } else {
+            lines.push(currentLine);
+            currentLine = [cur];
+        }
+    }
+    lines.push(currentLine);
+
+    // 每行内合并
+    const merged = [];
+    for (const line of lines) {
+        line.sort((a, b) => a.left - b.left);
+
+        let lineTop = Infinity, lineBottom = -Infinity;
+        for (const r of line) {
+            lineTop = Math.min(lineTop, r.top);
+            lineBottom = Math.max(lineBottom, r.top + r.height);
+        }
+        const lineHeight = lineBottom - lineTop;
+
+        let mLeft = line[0].left;
+        let mRight = line[0].left + line[0].width;
+
+        for (let i = 1; i < line.length; i++) {
+            const r = line[i];
+            const rRight = r.left + r.width;
+            // 间距 ≤ 2px 合并（PDF span 之间可能有微小间隙）
+            if (r.left <= mRight + 2) {
+                mRight = Math.max(mRight, rRight);
+            } else {
+                merged.push({ left: mLeft, top: lineTop, width: mRight - mLeft, height: lineHeight });
+                mLeft = r.left;
+                mRight = rRight;
+            }
+        }
+        merged.push({ left: mLeft, top: lineTop, width: mRight - mLeft, height: lineHeight });
+    }
+
+    return merged;
 }
 
 function renderHighlight(parent, cmd) {
@@ -1934,6 +2616,11 @@ function createPageContainer(pageNum, width, height, parent) {
 
     pageContainer.appendChild(canvas);
     pageContainer.appendChild(textLayer);
+
+    // Selection Layer — 自定义选区覆盖层，替代原生 ::selection 避免重叠
+    const selectionLayer = document.createElement('div');
+    selectionLayer.className = 'selection-layer';
+    pageContainer.appendChild(selectionLayer);
 
     // Highlight Layer (SVG for better precision and interaction)
     const highlightLayer = document.createElement('div');
@@ -2286,19 +2973,34 @@ function updateToolButtonState() {
     });
 }
 
-function switchSidebarTab(index) {
-    const tabs = document.querySelectorAll('.sidebar-tabs button');
-    if (!tabs.length || index < 0 || index >= tabs.length) return;
+function switchSidebarTab(tabName) {
+    const tab = tabName || 'outline';
+    state.activeTab = tab;
 
-    tabs.forEach((t, idx) => {
-        t.classList.toggle('active', idx === index);
-    });
+    const outlineView = elements.outlineView;
+    const thumbnailsView = elements.thumbnailsView;
+    const searchPanel = document.getElementById('searchPanel');
 
-    if (elements.outlineView) elements.outlineView.classList.toggle('hidden', index !== 0);
-    if (elements.thumbnailsView) elements.thumbnailsView.classList.toggle('hidden', index !== 1);
-    if (elements.searchResultsView) elements.searchResultsView.classList.toggle('hidden', index !== 2);
+    if (outlineView) outlineView.classList.toggle('hidden', tab !== 'outline');
+    if (thumbnailsView) thumbnailsView.classList.toggle('hidden', tab !== 'thumbnails');
+    if (searchPanel) searchPanel.classList.toggle('hidden', tab !== 'search');
 
-    state.activeTab = index === 0 ? 'outline' : index === 1 ? 'thumbnails' : 'search';
+    const tabOutline = document.getElementById('tabOutline');
+    const tabThumbnails = document.getElementById('tabThumbnails');
+    const tabSearch = document.getElementById('tabSearch');
+
+    tabOutline?.classList.toggle('active', tab === 'outline');
+    tabThumbnails?.classList.toggle('active', tab === 'thumbnails');
+    tabSearch?.classList.toggle('active', tab === 'search');
+
+    if (!state.sidebarVisible) {
+        state.sidebarVisible = true;
+        elements.sidebar?.classList.remove('closed');
+    }
+
+    if (tab === 'thumbnails') {
+        renderThumbnails().catch(e => console.warn('Thumbnails load failed:', e));
+    }
 }
 
 function isShortcutHelpOpen() {
@@ -2667,6 +3369,108 @@ function commitLassoSelection() {
     cancelLassoSelection();
 }
 
+function updateExportBoxVisual() {
+    if (!drawingState.exportBoxEl || !drawingState.exportStart || !drawingState.exportCurrent) return;
+    const left = Math.min(drawingState.exportStart.x, drawingState.exportCurrent.x);
+    const top = Math.min(drawingState.exportStart.y, drawingState.exportCurrent.y);
+    const width = Math.abs(drawingState.exportStart.x - drawingState.exportCurrent.x);
+    const height = Math.abs(drawingState.exportStart.y - drawingState.exportCurrent.y);
+    drawingState.exportBoxEl.style.left = `${left}px`;
+    drawingState.exportBoxEl.style.top = `${top}px`;
+    drawingState.exportBoxEl.style.width = `${width}px`;
+    drawingState.exportBoxEl.style.height = `${height}px`;
+}
+
+function cancelExportSelection() {
+    if (!drawingState.isExportSelecting) return;
+    const pageEl = document.getElementById(`page-${drawingState.exportPage}`);
+    pageEl?.classList.remove('lassoing');
+    drawingState.exportBoxEl?.remove();
+    drawingState.isExportSelecting = false;
+    drawingState.exportBoxEl = null;
+    drawingState.exportPage = null;
+    drawingState.exportStart = null;
+    drawingState.exportCurrent = null;
+    drawingState.exportPointerId = null;
+}
+
+async function commitExportSelection() {
+    if (!drawingState.isExportSelecting || !drawingState.exportStart || !drawingState.exportCurrent || !drawingState.exportPage) {
+        cancelExportSelection();
+        return;
+    }
+
+    const pageNum = drawingState.exportPage;
+    const pageEl = document.getElementById(`page-${pageNum}`);
+    if (!pageEl) {
+        cancelExportSelection();
+        return;
+    }
+
+    const left = Math.min(drawingState.exportStart.x, drawingState.exportCurrent.x);
+    const top = Math.min(drawingState.exportStart.y, drawingState.exportCurrent.y);
+    const right = Math.max(drawingState.exportStart.x, drawingState.exportCurrent.x);
+    const bottom = Math.max(drawingState.exportStart.y, drawingState.exportCurrent.y);
+    cancelExportSelection();
+
+    const minSize = 8;
+    if ((right - left) < minSize || (bottom - top) < minSize) {
+        showAnnoActionToast('框选区域过小，请重试', 'warning');
+        return;
+    }
+
+    const pageRect = pageEl.getBoundingClientRect();
+    const pageW = Math.max(1, pageRect.width);
+    const pageH = Math.max(1, pageRect.height);
+
+    const nx1 = Math.min(1, Math.max(0, left / pageW));
+    const ny1 = Math.min(1, Math.max(0, top / pageH));
+    const nx2 = Math.min(1, Math.max(0, right / pageW));
+    const ny2 = Math.min(1, Math.max(0, bottom / pageH));
+
+    const sourceCanvas = await renderPageCanvasForExport(pageNum, 2.5);
+    if (!sourceCanvas) {
+        showAnnoActionToast('导出失败：页面渲染异常', 'warning');
+        return;
+    }
+
+    const srcX = Math.max(0, Math.floor(nx1 * sourceCanvas.width));
+    const srcY = Math.max(0, Math.floor(ny1 * sourceCanvas.height));
+    const srcW = Math.min(sourceCanvas.width - srcX, Math.max(1, Math.floor((nx2 - nx1) * sourceCanvas.width)));
+    const srcH = Math.min(sourceCanvas.height - srcY, Math.max(1, Math.floor((ny2 - ny1) * sourceCanvas.height)));
+
+    if (srcW < 2 || srcH < 2) {
+        showAnnoActionToast('框选区域无有效内容', 'warning');
+        return;
+    }
+
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = srcW;
+    exportCanvas.height = srcH;
+    const exportCtx = exportCanvas.getContext('2d');
+    if (!exportCtx) {
+        showAnnoActionToast('导出失败：无法创建画布', 'warning');
+        return;
+    }
+    exportCtx.drawImage(sourceCanvas, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
+
+    const blob = await new Promise((resolve) => exportCanvas.toBlob(resolve, 'image/png'));
+    if (!blob) {
+        showAnnoActionToast('导出失败：图片生成异常', 'warning');
+        return;
+    }
+
+    const fileName = buildExportImageFileName({
+        page: pageNum,
+        kind: 'region',
+        width: srcW,
+        height: srcH,
+        extra: Date.now()
+    });
+    downloadBlobFile(blob, fileName);
+    showAnnoActionToast('手动框选导出成功');
+}
+
 // --- EVENTS ---
 
 function setupEvents() {
@@ -2761,6 +3565,10 @@ function setupEvents() {
     setupSearchEvents();
 
     const updateSelectingState = () => {
+        if (state.manualSel.active) {
+            state.isSelectingText = true;
+            return;
+        }
         const sel = window.getSelection();
         if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
             state.isSelectingText = false;
@@ -2783,7 +3591,228 @@ function setupEvents() {
     document.addEventListener('selectionchange', updateSelectingState);
     document.addEventListener('mouseup', () => setTimeout(updateSelectingState, 0));
 
+    // ===== 手动选区系统 =====
+    // 核心思路：拖选期间完全阻止浏览器原生选区，用 caretRangeFromPoint 自行计算选区，
+    // 只在 mouseup 时设置原生 Selection 供 Ctrl+C/翻译/批注消费。
+    let selectionRafId = null;
+
+    /**
+     * 原生选区 → 覆盖层渲染（仅用于双击选词、三击选行等非拖选场景）。
+     */
+    function renderSelectionOverlay() {
+        selectionRafId = null;
+        document.querySelectorAll('.selection-layer').forEach(layer => {
+            if (layer.childNodes.length) layer.innerHTML = '';
+        });
+
+        const selection = window.getSelection();
+        if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+
+        const range = selection.getRangeAt(0);
+
+        document.querySelectorAll('.page-container').forEach(pageContainer => {
+            const textLayer = pageContainer.querySelector('.textLayer');
+            if (!textLayer) return;
+            try {
+                if (!range.intersectsNode(textLayer)) return;
+            } catch { return; }
+
+            const selLayer = pageContainer.querySelector('.selection-layer');
+            if (!selLayer) return;
+
+            const containerRect = pageContainer.getBoundingClientRect();
+            const rawRects = getSelectedSpanRects(range, textLayer, containerRect);
+            const merged = mergeHighlightRects(rawRects);
+
+            const frag = document.createDocumentFragment();
+            for (const rect of merged) {
+                const div = document.createElement('div');
+                div.className = 'sel-rect';
+                div.style.left = rect.left + 'px';
+                div.style.top = rect.top + 'px';
+                div.style.width = rect.width + 'px';
+                div.style.height = rect.height + 'px';
+                frag.appendChild(div);
+            }
+            selLayer.appendChild(frag);
+        });
+    }
+
+    /**
+     * selectionchange 入口 — 仅在非手动拖选时触发覆盖层渲染
+     * （双击选词、三击选行、Ctrl+A 等浏览器原生选区行为）。
+     */
+    function scheduleSelectionRender() {
+        // 手动拖选期间，由 pointermove 调用 renderManualSelection()，不走此路径
+        if (state.manualSel.active) return;
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+            clearSelectionOverlay();
+            return;
+        }
+
+        if (selectionRafId) return;
+        selectionRafId = requestAnimationFrame(renderSelectionOverlay);
+    }
+
+    document.addEventListener('selectionchange', scheduleSelectionRender);
+
     elements.container?.addEventListener('pointerdown', (e) => {
+        if (!state.manualRegionExportArmed) return;
+        if (e.button !== 0) return;
+        const pageEl = e.target?.closest?.('.page-container');
+        if (!pageEl) return;
+        if (drawingState.isDrawing || drawingState.isDraggingText || drawingState.isLassoSelecting) return;
+
+        const pageNum = Number(pageEl.dataset.pageNumber || 0);
+        if (!pageNum) return;
+
+        const rect = pageEl.getBoundingClientRect();
+        drawingState.isExportSelecting = true;
+        drawingState.exportPage = pageNum;
+        drawingState.exportPointerId = e.pointerId;
+        drawingState.exportStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        drawingState.exportCurrent = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+
+        const box = document.createElement('div');
+        box.className = 'anno-lasso-box';
+        drawingState.exportBoxEl = box;
+        pageEl.appendChild(box);
+        pageEl.classList.add('lassoing');
+        updateExportBoxVisual();
+
+        try { elements.container.setPointerCapture?.(e.pointerId); } catch { /* ignore */ }
+        e.preventDefault();
+        e.stopPropagation();
+    }, { passive: false });
+
+    elements.container?.addEventListener('pointermove', (e) => {
+        if (!drawingState.isExportSelecting) return;
+        if (drawingState.exportPointerId !== null && e.pointerId !== drawingState.exportPointerId) return;
+        const pageEl = document.getElementById(`page-${drawingState.exportPage}`);
+        const rect = pageEl?.getBoundingClientRect();
+        if (!rect) return;
+        drawingState.exportCurrent = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        updateExportBoxVisual();
+        e.preventDefault();
+    }, { passive: false });
+
+    elements.container?.addEventListener('pointerup', (e) => {
+        if (!drawingState.isExportSelecting) return;
+        if (drawingState.exportPointerId !== null && e.pointerId !== drawingState.exportPointerId) return;
+        state.manualRegionExportArmed = false;
+        commitExportSelection().catch((err) => {
+            console.warn('手动框选导出失败:', err);
+            showAnnoActionToast('手动框选导出失败', 'warning');
+        });
+        try { elements.container.releasePointerCapture?.(e.pointerId); } catch { /* ignore */ }
+        e.preventDefault();
+    }, { passive: false });
+
+    // ── 手动选区：pointerdown → 记录锚点 / 空白区域取消选区 ──
+    elements.container?.addEventListener('pointerdown', (e) => {
+        if (state.manualRegionExportArmed || drawingState.isExportSelecting) return;
+        // 只接管左键、非 Ctrl（Ctrl 是框选批注）
+        if (e.button !== 0 || e.ctrlKey || e.metaKey) return;
+
+        // 检查目标是否在 textLayer 内
+        const target = e.target;
+        if (!(target instanceof Element)) return;
+        const textLayer = target.closest('.textLayer');
+
+        // 点击空白区域（非 textLayer / 非 UI 控件）→ 清除选区
+        if (!textLayer) {
+            const isUI = target.closest('#sidebar, .top-bar, .floating-panel, .toolbar-options, .zoom-menu, .popover, [contenteditable]');
+            if (!isUI) {
+                window.getSelection()?.removeAllRanges();
+                state.manualSel.range = null;
+                clearSelectionOverlay();
+            }
+            return;
+        }
+
+        // 批注工具模式不接管
+        if (state.activeTool && ['toolDraw', 'toolText', 'toolEraser'].includes(state.activeTool)) return;
+
+        const caret = caretFromPoint(e.clientX, e.clientY);
+        if (!caret) {
+            window.getSelection()?.removeAllRanges();
+            state.manualSel.range = null;
+            clearSelectionOverlay();
+            return;
+        }
+
+        // 记录锚点
+        state.manualSel.active = true;
+        state.manualSel.anchorNode = caret.node;
+        state.manualSel.anchorOffset = caret.offset;
+        state.manualSel.range = null;
+        state.manualSel.startPage = Number(textLayer.closest('.page-container')?.dataset?.pageNumber || 0);
+        state.isSelectingText = true;
+
+        // 清除之前的原生选区
+        window.getSelection()?.removeAllRanges();
+    }, { passive: true });
+
+    // ── 手动选区：selectstart 拦截 ──
+    // 拖选期间阻止浏览器自行创建选区（根源上消除跳跃）
+    document.addEventListener('selectstart', (e) => {
+        if (state.manualSel.active || drawingState.isExportSelecting) {
+            e.preventDefault();
+        }
+    });
+
+    // ── 手动选区：pointermove → 构建 Range + 渲染 ──
+    document.addEventListener('pointermove', (e) => {
+        if (!state.manualSel.active) return;
+        if ((e.buttons & 1) !== 1) return;
+
+        const caret = caretFromPoint(e.clientX, e.clientY);
+        if (!caret) return;
+
+        const range = buildManualRange(
+            state.manualSel.anchorNode,
+            state.manualSel.anchorOffset,
+            caret.node,
+            caret.offset
+        );
+
+        if (range) {
+            state.manualSel.range = range;
+            renderManualSelection();
+        }
+    }, { passive: true });
+
+    // ── 手动选区：pointerup → 提交到原生 Selection ──
+    document.addEventListener('pointerup', (e) => {
+        if (!state.manualSel.active) return;
+
+        // 最终一次 caretFromPoint 确保选区精确到 mouseup 位置
+        const caret = caretFromPoint(e.clientX, e.clientY);
+        if (caret) {
+            const range = buildManualRange(
+                state.manualSel.anchorNode,
+                state.manualSel.anchorOffset,
+                caret.node,
+                caret.offset
+            );
+            if (range) {
+                state.manualSel.range = range;
+                renderManualSelection();
+            }
+        }
+
+        // 将选区同步到原生 Selection（供 Ctrl+C / 翻译 / 批注使用）
+        commitManualSelection();
+
+        state.manualSel.active = false;
+        // 延迟重新检查 isSelectingText
+        setTimeout(updateSelectingState, 0);
+    }, { passive: true });
+
+    elements.container?.addEventListener('pointerdown', (e) => {
+        if (state.manualRegionExportArmed || drawingState.isExportSelecting) return;
         if (!(e.ctrlKey || e.metaKey)) return;
         if (e.button !== 0) return;
         const pageEl = e.target?.closest?.('.page-container');
@@ -2835,6 +3864,7 @@ function setupEvents() {
 
     elements.container?.addEventListener('pointercancel', () => {
         cancelLassoSelection();
+        cancelExportSelection();
     });
 
     // Sidebar Toggle
@@ -2880,6 +3910,16 @@ function setupEvents() {
     const optWidth = document.getElementById('optWidth');
     const optTextSize = document.getElementById('optTextSize');
 
+    function updateToolbarOptionsPosition() {
+        if (!toolbarOptions || !toolbarOptions.classList.contains('visible')) return;
+        
+        const activeToolBtn = document.querySelector('.btn-tool.active');
+        if (activeToolBtn) {
+            const rect = activeToolBtn.getBoundingClientRect();
+            toolbarOptions.style.top = `${rect.top}px`;
+        }
+    }
+
     // Add text selection listener for highlighting
     document.addEventListener('mouseup', handleTextSelection);
 
@@ -2893,23 +3933,22 @@ function setupEvents() {
         if (selection.isCollapsed || !selection.rangeCount) return;
 
         const range = selection.getRangeAt(0);
-        const textLayer = range.commonAncestorContainer.parentElement?.closest('.textLayer');
+        // commonAncestorContainer may be an Element (multi-span) or Text node (single-span)
+        const ancestor = range.commonAncestorContainer;
+        const textLayer = ancestor.nodeType === Node.ELEMENT_NODE
+            ? ancestor.closest('.textLayer')
+            : ancestor.parentElement?.closest('.textLayer');
         if (!textLayer) return;
 
         const pageContainer = textLayer.closest('.page-container');
         const pageNum = parseInt(pageContainer.dataset.pageNumber);
-        const rects = range.getClientRects();
         const containerRect = pageContainer.getBoundingClientRect();
 
-        const highlightRects = [];
-        for (const rect of rects) {
-            highlightRects.push({
-                left: rect.left - containerRect.left,
-                top: rect.top - containerRect.top,
-                width: rect.width,
-                height: rect.height
-            });
-        }
+        // 逐 span 精确提取选中矩形（避免 getClientRects 跨 span 碎片化/重叠）
+        const rawRects = getSelectedSpanRects(range, textLayer, containerRect);
+
+        // 合并同行相邻矩形，输出干净的行级高亮
+        const highlightRects = mergeHighlightRects(rawRects);
 
         if (highlightRects.length > 0) {
             const cmd = normalizeAnnotationCommand({
@@ -2938,7 +3977,10 @@ function setupEvents() {
         if (selection.isCollapsed || !selection.rangeCount) return;
 
         const range = selection.getRangeAt(0);
-        const textLayer = range.commonAncestorContainer.parentElement?.closest('.textLayer');
+        const ancestor = range.commonAncestorContainer;
+        const textLayer = ancestor.nodeType === Node.ELEMENT_NODE
+            ? ancestor.closest('.textLayer')
+            : ancestor.parentElement?.closest('.textLayer');
         if (!textLayer) return;
 
         // Get selected text
@@ -3008,6 +4050,7 @@ function setupEvents() {
 
                 // Show Options Toolbar
                 toolbarOptions.classList.add('visible');
+                updateToolbarOptionsPosition();
 
                 // Toggle specific groups
                 // Reset all first
@@ -3065,16 +4108,20 @@ function setupEvents() {
 
         // Sliders
         const widthSlider = document.getElementById('strokeWidth');
-        widthSlider.oninput = (e) => {
-            annoState.width = parseInt(e.target.value);
-            document.getElementById('strokeWidthVal').textContent = e.target.value + 'px';
-        };
+        if (widthSlider) {
+            widthSlider.oninput = (e) => {
+                annoState.width = parseInt(e.target.value);
+                document.getElementById('strokeWidthVal').textContent = e.target.value + 'px';
+            };
+        }
 
         const sizeSlider = document.getElementById('textSize');
-        sizeSlider.oninput = (e) => {
-            annoState.textSize = parseInt(e.target.value);
-            document.getElementById('textSizeVal').textContent = e.target.value + 'px';
-        };
+        if (sizeSlider) {
+            sizeSlider.oninput = (e) => {
+                annoState.textSize = parseInt(e.target.value);
+                document.getElementById('textSizeVal').textContent = e.target.value + 'px';
+            };
+        }
 
         const opacitySlider = document.getElementById('annoOpacity');
         if (opacitySlider) {
@@ -3119,8 +4166,10 @@ function setupEvents() {
         }
 
         // Undo/Redo
-        document.getElementById('btnUndo').onclick = performUndo;
-        document.getElementById('btnRedo').onclick = performRedo;
+        const btnUndo = document.getElementById('btnUndo');
+        const btnRedo = document.getElementById('btnRedo');
+        if (btnUndo) btnUndo.onclick = performUndo;
+        if (btnRedo) btnRedo.onclick = performRedo;
 
         // Shortcuts - Global Document Listener
         document.addEventListener('keydown', (e) => {
@@ -3141,9 +4190,17 @@ function setupEvents() {
                 return;
             }
 
+            if (e.key === 'Escape' && (state.manualRegionExportArmed || drawingState.isExportSelecting)) {
+                e.preventDefault();
+                state.manualRegionExportArmed = false;
+                cancelExportSelection();
+                showAnnoActionToast('已取消手动框选导出', 'warning');
+                return;
+            }
+
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
                 e.preventDefault();
-                switchSidebarTab(2);
+                switchSidebarTab('search');
                 elements.searchInput?.focus();
                 elements.searchInput?.select();
                 return;
@@ -3160,7 +4217,7 @@ function setupEvents() {
 
             if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key === '/') {
                 e.preventDefault();
-                switchSidebarTab(2);
+                switchSidebarTab('search');
                 elements.searchInput?.focus();
                 elements.searchInput?.select();
                 return;
@@ -3198,22 +4255,28 @@ function setupEvents() {
                 if (updateSelectedTextAnnotationSize(-1)) {
                     e.preventDefault();
                 }
-            } else if (!e.ctrlKey && !e.metaKey && !e.altKey && state.activeTab === 'search' && state.searchResults.length > 0 && (e.key.toLowerCase() === 'j' || e.key.toLowerCase() === 'k')) {
+            } else if (!e.ctrlKey && !e.metaKey && !e.altKey && state.searchResults.length > 0 && (e.key.toLowerCase() === 'j' || e.key.toLowerCase() === 'k')) {
                 e.preventDefault();
                 if (e.key.toLowerCase() === 'j') goToNextResult();
                 else goToPrevResult();
-            } else if (!e.ctrlKey && !e.metaKey && !e.altKey && state.activeTab === 'search' && state.searchResults.length > 0 && e.key === 'Enter') {
+            } else if (!e.ctrlKey && !e.metaKey && !e.altKey && state.searchResults.length > 0 && e.key === 'Enter') {
                 e.preventDefault();
                 if (state.searchIndex < 0) state.searchIndex = 0;
                 jumpToSearchResult(state.searchIndex);
-            } else if (!e.ctrlKey && !e.metaKey && !e.altKey && state.activeTab === 'search' && e.key === 'Escape') {
-                e.preventDefault();
-                if ((elements.searchInput?.value || '').trim()) {
-                    elements.searchInput.value = '';
-                    elements.searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-                } else {
-                    switchSidebarTab(0);
+            } else if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Escape') {
+                const searchPanel = document.getElementById('searchPanel');
+                if (searchPanel && !searchPanel.classList.contains('hidden')) {
+                    e.preventDefault();
+                    if ((elements.searchInput?.value || '').trim()) {
+                        elements.searchInput.value = '';
+                        elements.searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    } else {
+                        switchSidebarTab('outline');
+                    }
                 }
+            } else if (e.key === 'F11') {
+                e.preventDefault();
+                toggleFullscreen();
             } else if (e.key === 'PageDown') {
                 e.preventDefault();
                 const next = Math.min(state.pdf.numPages, state.currentPage + 1);
@@ -3232,19 +4295,55 @@ function setupEvents() {
         });
     }
 
-    // Sidebar Tabs (Outline & Thumbnails)
-    const tabs = document.querySelectorAll('.sidebar-tabs button');
-    tabs.forEach((tab, index) => {
-        tab.addEventListener('click', () => {
-            switchSidebarTab(index);
-        });
+    // Actions
+    const btnSearchToggle = document.getElementById('btnSearchToggle');
+    const searchPanel = document.getElementById('searchPanel');
+    const searchClose = document.getElementById('searchClose');
+
+    if (btnSearchToggle && searchPanel) {
+        btnSearchToggle.onclick = () => {
+            if (state.activeTab === 'search' && state.sidebarVisible) {
+                switchSidebarTab('outline');
+            } else {
+                switchSidebarTab('search');
+                elements.searchInput?.focus();
+                elements.searchInput?.select();
+            }
+        };
+    }
+
+    if (searchClose && searchPanel) {
+        searchClose.onclick = () => {
+            switchSidebarTab('outline');
+        };
+    }
+
+    document.getElementById('tabOutline')?.addEventListener('click', () => switchSidebarTab('outline'));
+    document.getElementById('tabThumbnails')?.addEventListener('click', () => switchSidebarTab('thumbnails'));
+    document.getElementById('tabSearch')?.addEventListener('click', () => {
+        switchSidebarTab('search');
+        elements.searchInput?.focus();
     });
 
-    // Actions
     document.getElementById('btnDarkMode').onclick = () => {
         state.isDarkMode = !state.isDarkMode;
         applyDarkMode(state.isDarkMode);
     };
+
+    const btnFullscreen = document.getElementById('btnFullscreen');
+    if (btnFullscreen) {
+        btnFullscreen.onclick = () => {
+            toggleFullscreen();
+        };
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+        syncFullscreenUI();
+        if (state.zoomMode !== 'manual') {
+            updateZoom(state.zoomMode);
+        }
+    });
+    syncFullscreenUI();
 
     const btnDownload = document.getElementById('btnDownload');
     if (btnDownload) {
@@ -3260,6 +4359,167 @@ function setupEvents() {
                 document.body.removeChild(a);
                 showAnnoActionToast('PDF 下载已开始');
             }
+        };
+    }
+
+    const exportCurrentPageImagesHandler = async () => {
+            try {
+                if (!state.pdf) {
+                    showAnnoActionToast('PDF 尚未加载完成', 'warning');
+                    return;
+                }
+
+                const pageNum = Number(state.currentPage || 1);
+                showAnnoActionToast(`正在识别第 ${pageNum} 页图片...`);
+
+                const images = await extractImagesFromPage(pageNum);
+                if (!images.length) {
+                    showAnnoActionToast('当前页未识别到可导出图片', 'warning');
+                    return;
+                }
+
+                let hasFallback = false;
+                for (let i = 0; i < images.length; i++) {
+                    const item = images[i];
+                    const name = buildExportImageFileName({
+                        page: pageNum,
+                        index: i + 1,
+                        kind: item.isFallback ? 'page' : 'img',
+                        width: item.width,
+                        height: item.height
+                    });
+                    downloadBlobFile(item.blob, name);
+                    if (item.isFallback) hasFallback = true;
+                    if (i < images.length - 1) {
+                        await new Promise((resolve) => setTimeout(resolve, 120));
+                    }
+                }
+
+                showAnnoActionToast(hasFallback
+                    ? `未提取到原始图片对象，已无损导出第 ${pageNum} 页图像`
+                    : `已导出 ${images.length} 张图片`);
+            } catch (error) {
+                console.warn('导出页面图片失败:', error);
+                showAnnoActionToast('导出图片失败', 'warning');
+            }
+    };
+
+    const btnExportImages = document.getElementById('btnExportImages');
+    if (btnExportImages) {
+        btnExportImages.onclick = exportCurrentPageImagesHandler;
+    }
+
+    const btnExportImagesMenu = document.getElementById('btnExportImagesMenu');
+    if (btnExportImagesMenu) {
+        btnExportImagesMenu.onclick = () => {
+            exportCurrentPageImagesHandler();
+            moreOptionsMenu?.classList.add('hidden');
+        };
+    }
+
+    const btnManualRegionExportMenu = document.getElementById('btnManualRegionExportMenu');
+    if (btnManualRegionExportMenu) {
+        btnManualRegionExportMenu.onclick = () => {
+            state.manualRegionExportArmed = true;
+            showAnnoActionToast('手动框选导出：请在页面上按住左键拖拽一个区域');
+            moreOptionsMenu?.classList.add('hidden');
+        };
+    }
+
+    const exportAllImagesHandler = async () => {
+            try {
+                if (!state.pdf) {
+                    showAnnoActionToast('PDF 尚未加载完成', 'warning');
+                    return;
+                }
+
+                const totalPages = Number(state.pdf.numPages || 0);
+                if (totalPages <= 0) {
+                    showAnnoActionToast('未检测到可用页', 'warning');
+                    return;
+                }
+
+                showAnnoActionToast(`开始识别整本 PDF 图片（共 ${totalPages} 页）...`);
+
+                let totalCount = 0;
+                let fallbackPages = 0;
+
+                for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                    const images = await extractImagesFromPage(pageNum);
+                    if (!images.length) continue;
+
+                    for (let i = 0; i < images.length; i++) {
+                        const item = images[i];
+                        const name = buildExportImageFileName({
+                            page: pageNum,
+                            index: i + 1,
+                            kind: item.isFallback ? 'page' : 'img',
+                            width: item.width,
+                            height: item.height
+                        });
+                        downloadBlobFile(item.blob, name);
+                        totalCount += 1;
+                        if (item.isFallback) fallbackPages += 1;
+                        await new Promise((resolve) => setTimeout(resolve, 100));
+                    }
+
+                    showAnnoActionToast(`第 ${pageNum}/${totalPages} 页完成，累计导出 ${totalCount} 张`);
+                }
+
+                if (totalCount === 0) {
+                    showAnnoActionToast('整本 PDF 未识别到可导出图片', 'warning');
+                    return;
+                }
+
+                showAnnoActionToast(fallbackPages > 0
+                    ? `整本导出完成，共 ${totalCount} 张（其中 ${fallbackPages} 页为无损整页兜底）`
+                    : `整本导出完成，共 ${totalCount} 张图片`);
+            } catch (error) {
+                console.warn('导出整本图片失败:', error);
+                showAnnoActionToast('导出整本图片失败', 'warning');
+            }
+    };
+
+    const btnExportAllImages = document.getElementById('btnExportAllImages');
+    if (btnExportAllImages) {
+        btnExportAllImages.onclick = exportAllImagesHandler;
+    }
+
+    const btnExportAllImagesMenu = document.getElementById('btnExportAllImagesMenu');
+    if (btnExportAllImagesMenu) {
+        btnExportAllImagesMenu.onclick = () => {
+            exportAllImagesHandler();
+            moreOptionsMenu?.classList.add('hidden');
+        };
+    }
+
+    const btnMoreOptions = document.getElementById('btnMoreOptions');
+    const moreOptionsMenu = document.getElementById('moreOptionsMenu');
+    if (btnMoreOptions && moreOptionsMenu) {
+        btnMoreOptions.onclick = (e) => {
+            e.stopPropagation();
+            moreOptionsMenu.classList.toggle('hidden');
+        };
+        document.addEventListener('click', (e) => {
+            if (!moreOptionsMenu.contains(e.target) && e.target !== btnMoreOptions) {
+                moreOptionsMenu.classList.add('hidden');
+            }
+        });
+    }
+
+    const btnAnnoImportMenu = document.getElementById('btnAnnoImportMenu');
+    if (btnAnnoImportMenu && elements.btnAnnoImport) {
+        btnAnnoImportMenu.onclick = () => {
+            elements.btnAnnoImport.click();
+            moreOptionsMenu?.classList.add('hidden');
+        };
+    }
+
+    const btnAnnoExportMenu = document.getElementById('btnAnnoExportMenu');
+    if (btnAnnoExportMenu && elements.btnAnnoExport) {
+        btnAnnoExportMenu.onclick = () => {
+            elements.btnAnnoExport.click();
+            moreOptionsMenu?.classList.add('hidden');
         };
     }
 
@@ -3334,28 +4594,7 @@ function setupEvents() {
     });
     updateAnnotationSelectionUI();
 
-    elements.container.onscroll = () => {
-        if (state.scrollRAF) return;
-        state.scrollRAF = requestAnimationFrame(() => {
-            renderVisiblePages();
-
-            const pageContainers = document.querySelectorAll('.page-container');
-            let currentInView = 1;
-            for (const p of pageContainers) {
-                const rect = p.getBoundingClientRect();
-                if (rect.top < window.innerHeight / 2 && rect.bottom > 100) {
-                    currentInView = parseInt(p.dataset.pageNumber);
-                    break;
-                }
-            }
-            if (state.currentPage !== currentInView) {
-                state.currentPage = currentInView;
-                elements.pageNumber.value = currentInView;
-                updateOutlineActive(currentInView);
-            }
-            state.scrollRAF = null;
-        });
-    };
+    elements.container.onscroll = null;
 
     // Clean up on window unload
     window.addEventListener('beforeunload', () => {
@@ -3590,8 +4829,6 @@ function setupSearchEvents() {
 
         renderSearchResultsList();
         scheduleSearchSessionSave();
-
-        switchSidebarTab(2);
     };
 
     state.runSearchFn = runSearch;

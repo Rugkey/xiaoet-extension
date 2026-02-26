@@ -11,262 +11,274 @@
 
 <body class="loading">
     <div id="app">
-        <!-- 1. Header Navigation -->
-        <header class="navbar">
-            <div class="nav-left">
-                <button id="sidebarToggle" class="btn-icon" title="Toggle Sidebar">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <!-- 1. Top Navigation Bar -->
+        <header class="top-bar">
+            <div class="top-bar-left">
+                <button id="sidebarToggle" class="btn-icon" title="切换侧边栏">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 12h18M3 6h18M3 18h18" />
                     </svg>
                 </button>
-                <h1 id="docTitle">Academic Document</h1>
+                <h1 id="docTitle" class="doc-title">Academic Document</h1>
             </div>
 
-            <div class="nav-middle">
-                <div class="view-controls">
-                    <button id="viewModeToggle" class="btn-icon" title="单页/双页切换">
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path d="M4 5h6v14H4V5zm10 0h6v14h-6V5z" />
-                        </svg>
-                    </button>
-                    <div class="zoom-controls-enhanced">
-                        <button id="zoomOut" class="btn-zoom" title="缩小">−</button>
-                        <button id="btnZoomMenu" class="btn-zoom-label" title="缩放选项">
-                            <span id="zoomLevel">100%</span>
-                            <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
-                                <path d="M7 10l5 5 5-5z" />
-                            </svg>
-                        </button>
-                        <button id="zoomIn" class="btn-zoom" title="放大">+</button>
-
-                        <!-- Dropdown Menu -->
-                        <div class="dropdown-menu hidden" id="zoomMenu">
-                            <div class="menu-item" data-action="fit-width">适应宽度</div>
-                            <div class="menu-item" data-action="fit-page">适应整页</div>
-                            <div class="menu-divider"></div>
-                            <div class="menu-item" data-action="50">50%</div>
-                            <div class="menu-item" data-action="100">100%</div>
-                            <div class="menu-item" data-action="150">150%</div>
-                            <div class="menu-item" data-action="200">200%</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="divider"></div>
-                <div class="page-nav">
+            <div class="top-bar-center">
+                <div class="page-controls">
                     <input type="number" id="pageNumber" value="1" min="1">
                     <span id="pageTotal">/ 0</span>
                 </div>
                 <div class="divider"></div>
-                <div class="search-controls">
-                    <input id="searchInput" type="text" placeholder="搜索文档内容 (Ctrl+F)" aria-label="搜索文档内容">
-                    <select id="searchScope" title="搜索范围">
-                        <option value="all">全文</option>
-                        <option value="current">当前页</option>
-                    </select>
-                    <button id="searchPrev" class="btn-icon" title="上一个匹配 (Shift+Enter)">↑</button>
-                    <button id="searchNext" class="btn-icon" title="下一个匹配 (Enter)">↓</button>
-                    <span id="searchStats" class="search-stats">0/0</span>
-                    <span id="indexStatus" class="search-stats" title="文本索引状态">索引:0%</span>
+                <div class="zoom-controls">
+                    <button id="zoomOut" class="btn-icon" title="缩小">−</button>
+                    <button id="btnZoomMenu" class="zoom-label" title="缩放选项">
+                        <span id="zoomLevel">100%</span>
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
+                            <path d="M7 10l5 5 5-5z" />
+                        </svg>
+                    </button>
+                    <button id="zoomIn" class="btn-icon" title="放大">+</button>
+
+                    <!-- Dropdown Menu -->
+                    <div class="dropdown-menu hidden" id="zoomMenu">
+                        <div class="menu-item" data-action="fit-width">适应宽度</div>
+                        <div class="menu-item" data-action="fit-page">适应整页</div>
+                        <div class="menu-divider"></div>
+                        <div class="menu-item" data-action="50">50%</div>
+                        <div class="menu-item" data-action="100">100%</div>
+                        <div class="menu-item" data-action="150">150%</div>
+                        <div class="menu-item" data-action="200">200%</div>
+                    </div>
                 </div>
                 <div class="divider"></div>
-                <div class="toolbar-module module-annotate" aria-label="批注模块">
-                    <div class="anno-toolbar">
-                        <button class="btn-tool" id="toolHighlight" title="Highlight">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <path d="M9 11l-6 6v3h9l3-3" />
-                                <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" />
-                            </svg>
-                        </button>
-                        <button class="btn-tool" id="toolDraw" title="Pen">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <path d="M12 19l7-7 3 3-7 7-3-3z" />
-                                <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
-                                <path d="M2 2l7.586 7.586" />
-                                <circle cx="11" cy="11" r="2" />
-                            </svg>
-                        </button>
-                        <button class="btn-tool" id="toolText" title="Text">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <path d="M4 7V4h16v3M9 20h6M12 4v16" />
-                            </svg>
-                        </button>
-                        <button class="btn-tool" id="toolEraser" title="Eraser">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <path d="M20 20H7L3 16C2 15 2 13 3 12L13 2L22 11L18 15" />
-                                <path d="M11 3L20 12" />
-                            </svg>
-                        </button>
-                    </div>
-                    <span class="module-title">批注工具</span>
-                </div>
+                <button id="viewModeToggle" class="btn-icon" title="单页/双页切换">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M4 5h6v14H4V5zm10 0h6v14h-6V5z" />
+                    </svg>
+                </button>
             </div>
 
-            <div class="nav-right">
-                <div class="toolbar-module module-edit" aria-label="编辑操作模块">
-                    <div class="module-content">
-                        <button id="btnUndo" class="btn-icon" title="撤销 (Ctrl+Z)" disabled>
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M3 7v6h6" />
-                                <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
-                            </svg>
-                        </button>
-                        <button id="btnRedo" class="btn-icon" title="重做 (Ctrl+Y)" disabled>
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M21 7v6h-6" />
-                                <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" />
-                            </svg>
-                        </button>
+            <div class="top-bar-right">
+                <button id="btnSearchToggle" class="btn-icon" title="搜索 (Ctrl+F)">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                </button>
+                <button id="btnDarkMode" class="btn-icon" title="深色模式">🌓</button>
+                <button id="btnFullscreen" class="btn-icon" title="全屏 (F11)" aria-label="进入全屏">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M8 3H3v5" />
+                        <path d="M16 3h5v5" />
+                        <path d="M21 16v5h-5" />
+                        <path d="M8 21H3v-5" />
+                    </svg>
+                </button>
+                <div class="divider"></div>
+                <button id="btnDownload" class="btn-icon" title="下载 PDF 原文件">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 3v12" />
+                        <path d="M7 10l5 5 5-5" />
+                        <path d="M5 20h14" />
+                    </svg>
+                </button>
+                <div class="more-menu-container">
+                    <button id="btnMoreOptions" class="btn-icon" title="更多选项">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="1"></circle>
+                            <circle cx="12" cy="5" r="1"></circle>
+                            <circle cx="12" cy="19" r="1"></circle>
+                        </svg>
+                    </button>
+                    <div class="dropdown-menu hidden" id="moreOptionsMenu">
+                        <div class="menu-item" id="btnAnnoImportMenu">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5-5 5 5" /><path d="M12 5v10" /></svg>
+                            导入批注
+                        </div>
+                        <div class="menu-item" id="btnAnnoExportMenu">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><path d="M12 11v6" /><path d="M9.5 14.5 12 17l2.5-2.5" /></svg>
+                            导出批注
+                        </div>
+                        <div class="menu-item" id="btnManualRegionExportMenu">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;"><path d="M4 4h6M4 4v6M20 4h-6M20 4v6M4 20h6M4 20v-6M20 20h-6M20 20v-6" /><rect x="8" y="8" width="8" height="8" rx="1" ry="1" /></svg>
+                            手动框选导出
+                        </div>
+                        <div class="menu-item" id="btnExportImagesMenu">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;"><rect x="3" y="5" width="18" height="14" rx="2" ry="2" /><circle cx="9" cy="10" r="1.5" /><path d="M21 16l-5-5-5 5-3-3-5 5" /></svg>
+                            导出当前页图片
+                        </div>
+                        <div class="menu-item" id="btnExportAllImagesMenu">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;"><rect x="3" y="4" width="14" height="10" rx="1.5" ry="1.5" /><path d="M17 8h4" /><path d="M17 12h4" /><rect x="7" y="12" width="14" height="8" rx="1.5" ry="1.5" /></svg>
+                            导出整本图片
+                        </div>
                     </div>
-                    <span class="module-title">编辑操作</span>
-                </div>
-
-                <div class="toolbar-module module-file" aria-label="文件操作模块">
-                    <div class="module-content">
-                        <button id="btnAnnoImport" class="btn-icon" title="导入批注">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                <path d="M7 10l5-5 5 5" />
-                                <path d="M12 5v10" />
-                            </svg>
-                        </button>
-                        <button id="btnAnnoExport" class="btn-icon with-label anno-export-btn" title="导出批注">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                <polyline points="14 2 14 8 20 8" />
-                                <path d="M12 11v6" />
-                                <path d="M9.5 14.5 12 17l2.5-2.5" />
-                            </svg>
-                            <span class="btn-label">批注</span>
-                        </button>
-                        <button id="btnDownload" class="btn-icon with-label pdf-download-btn" title="下载 PDF 原文件">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M12 3v12" />
-                                <path d="M7 10l5 5 5-5" />
-                                <path d="M5 20h14" />
-                            </svg>
-                            <span class="btn-label">PDF</span>
-                        </button>
-                    </div>
-                    <span class="module-title">文件操作</span>
                 </div>
                 <input type="file" id="annoImportFile" accept=".json,application/json" style="display:none;" />
-                <button id="btnDarkMode" class="btn-icon" title="Toggle Dark Mode">🌓</button>
-            </div>
-
-            <!-- Contextual Toolbar Options -->
-            <div id="toolbarOptions" class="toolbar-options">
-                <!-- Color Picker -->
-                <div class="option-group" id="optColor">
-                    <span class="option-label">颜色</span>
-                    <div class="color-swatch active" style="background-color: #ef4444;" data-color="#ef4444"><span
-                            class="check-icon">✓</span></div>
-                    <div class="color-swatch" style="background-color: #f59e0b;" data-color="#f59e0b"><span
-                            class="check-icon">✓</span></div>
-                    <div class="color-swatch" style="background-color: #10b981;" data-color="#10b981"><span
-                            class="check-icon">✓</span></div>
-                    <div class="color-swatch" style="background-color: #3b82f6;" data-color="#3b82f6"><span
-                            class="check-icon">✓</span></div>
-                    <div class="color-swatch" style="background-color: #000000;" data-color="#000000"><span
-                            class="check-icon">✓</span></div>
-                    <input type="color" id="customColor"
-                        style="width:24px; height:24px; padding:0; border:none; background:none; cursor:pointer;"
-                        title="自定义颜色">
-                </div>
-
-                <!-- Stroke Width -->
-                <div class="option-group" id="optWidth">
-                    <span class="option-label">Size</span>
-                    <input type="range" id="strokeWidth" class="range-slider" min="1" max="20" value="2"
-                        title="画笔/橡皮擦粗细">
-                    <span id="strokeWidthVal" style="font-size:12px; min-width:20px; text-align:center;">2px</span>
-                </div>
-
-                <!-- Text Size -->
-                <div class="option-group hidden" id="optTextSize">
-                    <span class="option-label">Font</span>
-                    <input type="range" id="textSize" class="range-slider" min="10" max="48" value="14">
-                    <span id="textSizeVal" style="font-size:12px; min-width:20px; text-align:center;">14px</span>
-
-                    <div class="font-style-group">
-                        <button id="btnBold" class="btn-icon-small" title="加粗 (Bold)">B</button>
-                        <button id="btnItalic" class="btn-icon-small" style="font-style:italic;"
-                            title="斜体 (Italic)">I</button>
-                        <button id="btnUnderline" class="btn-icon-small" style="text-decoration:underline;"
-                            title="下划线 (Underline)">U</button>
-                        <button id="btnStrike" class="btn-icon-small" style="text-decoration:line-through;"
-                            title="中划线 (Strikethrough)">S</button>
-                    </div>
-                </div>
-
-                <!-- Opacity -->
-                <div class="option-group" id="optOpacity">
-                    <span class="option-label">Opacity</span>
-                    <input type="range" id="annoOpacity" class="range-slider" min="0" max="100" value="100"
-                        title="不透明度">
-                    <span id="annoOpacityVal" style="font-size:12px; min-width:20px; text-align:center;">100%</span>
-                </div>
-
-                <div class="option-group" id="optObjectActions">
-                    <span class="option-label">Object</span>
-                    <span id="annoSelectionStats" class="anno-selection-stats">未选中</span>
-                    <button id="btnAnnoHelp" class="btn-icon-small" title="批注选择帮助">?</button>
-                    <button id="btnAnnoSelectText" class="btn-icon-small" title="选择当前页文本批注">文本</button>
-                    <button id="btnAnnoSelectHighlight" class="btn-icon-small" title="选择当前页高亮批注">高亮</button>
-                    <button id="btnAnnoSelectInk" class="btn-icon-small" title="选择当前页笔迹批注">笔迹</button>
-                    <button id="btnAnnoSelectPage" class="btn-icon-small" title="全选当前页对象 (Ctrl/Cmd+A)">全选页</button>
-                    <button id="btnAnnoInvertPage" class="btn-icon-small" title="反选当前页对象 (Ctrl/Cmd+Shift+A)">反选页</button>
-                    <button id="btnAnnoApplyEdit" class="btn-icon-small" title="应用当前样式到选中对象">应用</button>
-                    <button id="btnAnnoDelete" class="btn-icon-small" title="删除选中对象">删除</button>
-                </div>
-            </div>
-
-            <div id="annoSelectionPopover" class="anno-floating-panel hidden" role="dialog" aria-label="选中对象明细">
-                <div class="anno-floating-title">选中对象明细</div>
-                <div id="annoSelectionPopoverContent" class="anno-floating-body">未选中对象</div>
-            </div>
-
-            <div id="annoHelpPopover" class="anno-floating-panel hidden" role="dialog" aria-label="批注操作帮助">
-                <div class="anno-floating-title">批注操作帮助</div>
-                <div class="anno-floating-body">
-                    <div>• 文本/高亮/笔迹：按类型快速选择当前页对象</div>
-                    <div>• 全选页/反选页：批量选择当前页对象</div>
-                    <div>• 应用：将当前样式应用到已选对象</div>
-                    <div>• 删除：删除全部已选对象（支持 Ctrl/Cmd + Z 撤销）</div>
-                    <div>• Ctrl/Cmd + 拖拽：框选对象；Shift 可追加选择</div>
-                </div>
+                <!-- Hidden buttons to keep JS working -->
+                <button id="btnAnnoImport" style="display:none;"></button>
+                <button id="btnAnnoExport" style="display:none;"></button>
             </div>
         </header>
 
-        <main class="viewer-layout">
+        <main class="main-container">
             <!-- 2. Sidebar -->
             <aside id="sidebar" class="sidebar">
-                <div class="sidebar-tabs">
-                    <button class="active">目录</button>
-                    <button>缩略图</button>
-                    <button>搜索</button>
+                <div class="sidebar-header">文档导航</div>
+                <div class="sidebar-tabs" id="sidebarTabs">
+                    <button id="tabOutline" class="sidebar-tab active" title="目录">目录</button>
+                    <button id="tabThumbnails" class="sidebar-tab" title="缩略图">缩略图</button>
+                    <button id="tabSearch" class="sidebar-tab" title="搜索">搜索</button>
                 </div>
-                <!-- Sidebar UI Cleanup -->
-                <div id="outlineView" class="scroll-area">
-                    <!-- Outline injected here -->
+                <div id="outlineView" class="scroll-area"></div>
+                <div id="thumbnailsView" class="scroll-area hidden"></div>
+                <div id="searchPanel" class="sidebar-search-panel hidden">
+                    <div class="search-header">
+                        <div class="search-input-wrapper">
+                            <input id="searchInput" type="text" placeholder="搜索文档内容 (Ctrl+F)" aria-label="搜索文档内容">
+                            <span id="searchStats" class="search-stats">0/0</span>
+                        </div>
+                        <div class="search-actions">
+                            <button id="searchPrev" class="btn-icon-small" title="上一个匹配 (Shift+Enter)">↑</button>
+                            <button id="searchNext" class="btn-icon-small" title="下一个匹配 (Enter)">↓</button>
+                            <button id="searchClose" class="btn-icon-small" title="关闭">×</button>
+                        </div>
+                    </div>
+                    <div class="search-options">
+                        <select id="searchScope" title="搜索范围">
+                            <option value="all">全文</option>
+                            <option value="current">当前页</option>
+                        </select>
+                        <span id="indexStatus" class="index-status" title="文本索引状态">索引:0%</span>
+                    </div>
+                    <div id="searchResultsView" class="search-results-area">
+                        <div class="search-empty">输入关键词并回车后，这里会显示搜索结果</div>
+                    </div>
                 </div>
-                <div id="searchResultsView" class="scroll-area hidden">
-                    <div class="search-empty">输入关键词并回车后，这里会显示搜索结果</div>
-                </div>
-                <!-- Markdown View Removed -->
             </aside>
 
-            <!-- 3. PDF Viewer -->
-            <section id="viewerContainer" class="pdf-scroller">
-                <div id="pdfViewer" class="pdf-canvas-layer">
-                    <!-- Pages injected here -->
+            <!-- 3. Viewer Area -->
+            <div class="viewer-area">
+                <!-- Vertical Toolbar for Annotations -->
+                <div class="annotation-toolbar">
+                    <button class="btn-tool" id="toolHighlight" title="高亮">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 11l-6 6v3h9l3-3" />
+                            <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" />
+                        </svg>
+                    </button>
+                    <button class="btn-tool" id="toolDraw" title="画笔">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 19l7-7 3 3-7 7-3-3z" />
+                            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+                            <path d="M2 2l7.586 7.586" />
+                            <circle cx="11" cy="11" r="2" />
+                        </svg>
+                    </button>
+                    <button class="btn-tool" id="toolText" title="文本">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 7V4h16v3M9 20h6M12 4v16" />
+                        </svg>
+                    </button>
+                    <button class="btn-tool" id="toolEraser" title="橡皮擦">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M20 20H7L3 16C2 15 2 13 3 12L13 2L22 11L18 15" />
+                            <path d="M11 3L20 12" />
+                        </svg>
+                    </button>
+                    <div class="divider-horizontal"></div>
+                    <button id="btnUndo" class="btn-icon" title="撤销 (Ctrl+Z)" disabled>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 7v6h6" />
+                            <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+                        </svg>
+                    </button>
+                    <button id="btnRedo" class="btn-icon" title="重做 (Ctrl+Y)" disabled>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 7v6h-6" />
+                            <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" />
+                        </svg>
+                    </button>
                 </div>
-            </section>
+
+                <!-- Contextual Toolbar Options -->
+                <div id="toolbarOptions" class="toolbar-options-panel">
+                    <!-- Color Picker -->
+                    <div class="option-group" id="optColor">
+                        <span class="option-label">颜色</span>
+                        <div class="color-swatch active" style="background-color: #ef4444;" data-color="#ef4444"><span class="check-icon">✓</span></div>
+                        <div class="color-swatch" style="background-color: #f59e0b;" data-color="#f59e0b"><span class="check-icon">✓</span></div>
+                        <div class="color-swatch" style="background-color: #10b981;" data-color="#10b981"><span class="check-icon">✓</span></div>
+                        <div class="color-swatch" style="background-color: #3b82f6;" data-color="#3b82f6"><span class="check-icon">✓</span></div>
+                        <div class="color-swatch" style="background-color: #000000;" data-color="#000000"><span class="check-icon">✓</span></div>
+                        <input type="color" id="customColor" style="width:24px; height:24px; padding:0; border:none; background:none; cursor:pointer;" title="自定义颜色">
+                    </div>
+
+                    <!-- Stroke Width -->
+                    <div class="option-group" id="optWidth">
+                        <span class="option-label">粗细</span>
+                        <input type="range" id="strokeWidth" class="range-slider" min="1" max="20" value="2" title="画笔/橡皮擦粗细">
+                        <span id="strokeWidthVal" class="range-val">2px</span>
+                    </div>
+
+                    <!-- Text Size -->
+                    <div class="option-group hidden" id="optTextSize">
+                        <span class="option-label">字号</span>
+                        <input type="range" id="textSize" class="range-slider" min="10" max="48" value="14">
+                        <span id="textSizeVal" class="range-val">14px</span>
+
+                        <div class="font-style-group">
+                            <button id="btnBold" class="btn-icon-small" title="加粗 (Bold)">B</button>
+                            <button id="btnItalic" class="btn-icon-small" style="font-style:italic;" title="斜体 (Italic)">I</button>
+                            <button id="btnUnderline" class="btn-icon-small" style="text-decoration:underline;" title="下划线 (Underline)">U</button>
+                            <button id="btnStrike" class="btn-icon-small" style="text-decoration:line-through;" title="中划线 (Strikethrough)">S</button>
+                        </div>
+                    </div>
+
+                    <!-- Opacity -->
+                    <div class="option-group" id="optOpacity">
+                        <span class="option-label">透明度</span>
+                        <input type="range" id="annoOpacity" class="range-slider" min="0" max="100" value="100" title="不透明度">
+                        <span id="annoOpacityVal" class="range-val">100%</span>
+                    </div>
+
+                    <div class="option-group" id="optObjectActions">
+                        <span class="option-label">对象</span>
+                        <span id="annoSelectionStats" class="anno-selection-stats">未选中</span>
+                        <button id="btnAnnoHelp" class="btn-icon-small" title="批注选择帮助">?</button>
+                        <button id="btnAnnoSelectText" class="btn-icon-small" title="选择当前页文本批注">文本</button>
+                        <button id="btnAnnoSelectHighlight" class="btn-icon-small" title="选择当前页高亮批注">高亮</button>
+                        <button id="btnAnnoSelectInk" class="btn-icon-small" title="选择当前页笔迹批注">笔迹</button>
+                        <button id="btnAnnoSelectPage" class="btn-icon-small" title="全选当前页对象 (Ctrl/Cmd+A)">全选页</button>
+                        <button id="btnAnnoInvertPage" class="btn-icon-small" title="反选当前页对象 (Ctrl/Cmd+Shift+A)">反选页</button>
+                        <button id="btnAnnoApplyEdit" class="btn-icon-small" title="应用当前样式到选中对象">应用</button>
+                        <button id="btnAnnoDelete" class="btn-icon-small" title="删除选中对象">删除</button>
+                    </div>
+                </div>
+
+                <!-- PDF Container -->
+                <section id="viewerContainer" class="pdf-scroller">
+                    <div id="pdfViewer" class="pdf-canvas-layer">
+                        <!-- Pages injected here -->
+                    </div>
+                </section>
+            </div>
         </main>
+    </div>
+
+    <!-- Popovers and Overlays -->
+    <div id="annoSelectionPopover" class="anno-floating-panel hidden" role="dialog" aria-label="选中对象明细">
+        <div class="anno-floating-title">选中对象明细</div>
+        <div id="annoSelectionPopoverContent" class="anno-floating-body">未选中对象</div>
+    </div>
+
+    <div id="annoHelpPopover" class="anno-floating-panel hidden" role="dialog" aria-label="批注操作帮助">
+        <div class="anno-floating-title">批注操作帮助</div>
+        <div class="anno-floating-body">
+            <div>• 文本/高亮/笔迹：按类型快速选择当前页对象</div>
+            <div>• 全选页/反选页：批量选择当前页对象</div>
+            <div>• 应用：将当前样式应用到已选对象</div>
+            <div>• 删除：删除全部已选对象（支持 Ctrl/Cmd + Z 撤销）</div>
+            <div>• Ctrl/Cmd + 拖拽：框选对象；Shift 可追加选择</div>
+        </div>
     </div>
 
     <div id="loadingOverlay" class="overlay">
@@ -290,6 +302,7 @@
                 <div><kbd>J</kbd>/<kbd>K</kbd><span>搜索面板中下/上一个命中</span></div>
                 <div><kbd>Enter</kbd><span>跳转当前命中</span></div>
                 <div><kbd>Esc</kbd><span>清空搜索或返回目录</span></div>
+                <div><kbd>F11</kbd><span>进入/退出全屏</span></div>
                 <div><kbd>Ctrl/Cmd + A</kbd><span>全选当前页批注对象</span></div>
                 <div><kbd>Ctrl/Cmd + Shift + A</kbd><span>反选当前页批注对象</span></div>
                 <div><kbd>?</kbd><span>打开/关闭本帮助</span></div>
@@ -312,7 +325,6 @@
     <script src="../../content/ocr-translator.js" defer></script>
     <script src="../../content/main.js" defer></script>
     <script src="academic-viewer.js" defer></script>
-    <!-- AI Styles Removed -->
 </body>
 
 </html>
