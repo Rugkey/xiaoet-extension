@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AcadMaster",
-  "version": "2.1",
+  "version": "2.2.0",
   "description": "学术大拿 - 你的科研翻译助手",
   "permissions": [
     "activeTab",
